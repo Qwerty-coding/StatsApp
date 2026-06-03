@@ -1,10 +1,11 @@
 import type { NextConfig } from "next";
-import path from "path";
+
+const projectRoot = process.cwd();
 
 const nextConfig = {
-  // Set Turbopack root to workspace parent and allow dev origin
+  outputFileTracingRoot: projectRoot,
   turbopack: {
-    root: path.resolve(__dirname, ".."),
+    root: projectRoot,
   },
   allowedDevOrigins: ["10.228.239.71"],
 } as unknown as NextConfig;
