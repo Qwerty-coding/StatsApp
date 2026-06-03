@@ -16,7 +16,6 @@ class WhatsAppParser {
     };
 
     const scores = {};
-    // Expanded to 50 lines to account for large multiline texts at the start of a file
     const sampleLines = this.lines.slice(0, 50);
     
     for (const [key, pattern] of Object.entries(patterns)) {
@@ -34,7 +33,6 @@ class WhatsAppParser {
   parse() {
     try {
       const format = this.detectFormat();
-      // Lowered threshold to 25% to prevent false-failures on chatty multiline groups
       if (format.confidence < 25) this.errors.push(`Low confidence format (${format.confidence}%).`);
       
       const messages = format.parser();
@@ -130,10 +128,8 @@ class WhatsAppParser {
     const messages = [];
     let currentMessage = null;
     
-    // Core regex to match the prefix exactly
     const prefixRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2})[\s\u202F]*([aApP][mM])\s+-\s+(.*)/;
     
-    // Known system notification keywords
     const systemKeywords = [
       "created group", "added you", "added", "removed", "left", 
       "changed group description", "changed the subject", "changed this group's icon",
@@ -158,10 +154,8 @@ class WhatsAppParser {
         let sender = "[System]";
         let text = restOfLine;
 
-        // If there is a colon, it's likely a standard text message
         if (colonIndex !== -1) {
           const tentativeSender = restOfLine.substring(0, colonIndex);
-          // Verify the sender name doesn't contain a system keyword (false positive prevention)
           const matchesSystemAction = systemKeywords.some(keyword => tentativeSender.includes(keyword));
           
           if (!matchesSystemAction) {
@@ -171,7 +165,6 @@ class WhatsAppParser {
           }
         }
 
-        // Final check for system messages
         if (isSystem) {
           isSystem = systemKeywords.some(keyword => restOfLine.includes(keyword)) || colonIndex === -1;
         }
@@ -184,7 +177,6 @@ class WhatsAppParser {
           isSystem
         };
       } else {
-        // Multi-line continuation
         if (currentMessage) currentMessage.text += '\n' + line;
       }
     }
@@ -344,7 +336,6 @@ class WhatsAppParser {
     const hourlyStats = Array(24).fill(0);
     let validMessages = [];
 
-    // First pass: Filter system messages and calculate base counts
     for (const msg of messages) {
       if (msg.isSystem) continue;
 
@@ -358,7 +349,6 @@ class WhatsAppParser {
         const day = date.toLocaleDateString("en-US", { weekday: "long" });
         const hour = date.getHours();
         
-        // Format as YYYY-MM-DD for accurate grouping
         const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
         dayCounts[day] = (dayCounts[day] || 0) + 1;
@@ -445,14 +435,99 @@ class WhatsAppParser {
   }
 }
 
+function extractTelegramText(textField) {
+  if (typeof textField === 'string') {
+    return textField;
+  }
+  if (Array.isArray(textField)) {
+    return textField
+      .map(segment => {
+        if (typeof segment === 'string') return segment;
+        if (segment && typeof segment === 'object' && typeof segment.text === 'string') return segment.text;
+        return '';
+      })
+      .join('');
+  }
+  return '';
+}
+
+function parseTelegram(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error('Invalid Telegram JSON: ' + e.message);
+  }
+
+  const rawMessages = data.messages;
+  if (!Array.isArray(rawMessages)) {
+    throw new Error('Telegram JSON does not contain a "messages" array.');
+  }
+
+  const messages = [];
+
+  for (const msg of rawMessages) {
+    if (msg.type !== 'message') continue;
+
+    const plainText = extractTelegramText(msg.text);
+    if (!plainText || !plainText.trim()) continue;
+
+    const sender = (msg.from || '[Unknown]').trim();
+    const timestamp = msg.date ? new Date(msg.date).getTime() : Date.now();
+
+    messages.push({
+      timestamp,
+      sender,
+      text: plainText.trim(),
+      isMedia: false,
+      isSystem: false
+    });
+  }
+
+  return messages;
+}
+
 self.onmessage = function (e) {
-  const parser = new WhatsAppParser(e.data);
-  const result = parser.parse();
-  self.postMessage({
-    success: result.success,
-    format: result.format,
-    stats: result.stats,
-    messages: result.messages,
-    warnings: result.warnings
-  });
+  const { text, fileType } = e.data;
+
+  try {
+    let messages;
+    let format;
+
+    if (fileType === 'telegram') {
+      messages = parseTelegram(text);
+      format = 'telegram_json';
+    } else {
+      const parser = new WhatsAppParser(text);
+      const result = parser.parse();
+
+      self.postMessage({
+        success: result.success,
+        format: result.format,
+        stats: result.stats,
+        messages: result.messages,
+        warnings: result.warnings
+      });
+      return;
+    }
+
+    const parser = new WhatsAppParser('');
+    const stats = parser.aggregateStats(messages);
+
+    self.postMessage({
+      success: true,
+      format,
+      stats,
+      messages,
+      warnings: []
+    });
+  } catch (error) {
+    self.postMessage({
+      success: false,
+      format: null,
+      stats: null,
+      messages: [],
+      warnings: [error.message]
+    });
+  }
 };

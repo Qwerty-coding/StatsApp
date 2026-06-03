@@ -9,10 +9,11 @@ export default function Home() {
   const [parsedData, setParsedData] = useState<any>(null);
   
   const processFile = useCallback((file: File) => {
-    if (!file.name.endsWith(".txt")) {
+    if (!file.name.endsWith(".txt") && !file.name.endsWith(".json")) {
       setStatus("error");
       return;
     }
+    const fileType = file.name.endsWith(".json") ? "telegram" : "whatsapp";
     setFilename(file.name);
     setStatus("loading");
 
@@ -38,7 +39,7 @@ export default function Home() {
         worker.terminate();
       };
 
-      worker.postMessage(text);
+      worker.postMessage({ text, fileType });
     };
     reader.readAsText(file, "utf-8");
   }, []);
@@ -61,10 +62,10 @@ export default function Home() {
   );
 
   const statusText: Record<typeof status, string> = {
-    idle: "Drop your WhatsApp .txt export here",
+    idle: "Drop your WhatsApp (.txt) or Telegram (.json) export here",
     loading: "Parsing…",
     done: `✓ Done — check console for output (${filename})`,
-    error: "Something went wrong — make sure it's a .txt file",
+    error: "Something went wrong — make sure it's a .txt or .json file",
   };
   
   if (parsedData) {
@@ -78,7 +79,7 @@ export default function Home() {
           VibeCheck
         </h1>
         <p className="text-zinc-500 text-sm mb-8">
-          Local WhatsApp chat analyzer — nothing leaves your device.
+          Local chat analyzer — nothing leaves your device.
         </p>
 
         <div
@@ -95,7 +96,7 @@ export default function Home() {
         >
           <input
             type="file"
-            accept=".txt"
+            accept=".txt,.json"
             onChange={onFileChange}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
@@ -135,7 +136,7 @@ export default function Home() {
         </div>
 
         <p className="text-zinc-700 text-xs text-center mt-6">
-          Export a chat in WhatsApp → ··· → More → Export chat → Without Media
+          WhatsApp: ··· → More → Export chat → Without Media &nbsp;·&nbsp; Telegram: ··· → Export Chat History → Format: JSON
         </p>
       </div>
     </main>
