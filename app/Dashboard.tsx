@@ -22,8 +22,6 @@ interface DashboardProps {
   };
 }
 
-const medals = ["🥇", "🥈", "🥉"];
-
 function calculateStats(messages: Message[]) {
   if (!messages || messages.length === 0) return {};
 
@@ -59,11 +57,9 @@ function calculateStats(messages: Message[]) {
   let totalGapMs = 0;
   let gapCount = 0;
 
-  // Icebreaker: tally who sent the first message after 6+ hour silence
   const icebreakerCounts: Record<string, number> = {};
   const SIX_HOURS = 21_600_000;
 
-  // Monologuer: longest consecutive streak
   const monologuerStreaks: Record<string, number> = {};
   let currentStreak = 1;
   let currentSender = validMessages[0]?.sender ?? "";
@@ -74,13 +70,11 @@ function calculateStats(messages: Message[]) {
     totalGapMs += gap;
     gapCount++;
 
-    // Icebreaker
     if (gap > SIX_HOURS) {
       const reviver = validMessages[i].sender;
       icebreakerCounts[reviver] = (icebreakerCounts[reviver] || 0) + 1;
     }
 
-    // Monologuer
     if (validMessages[i].sender === currentSender) {
       currentStreak++;
     } else {
@@ -92,7 +86,7 @@ function calculateStats(messages: Message[]) {
       currentSender = validMessages[i].sender;
     }
   }
-  // Flush final streak
+  
   if (currentSender && (!monologuerStreaks[currentSender] || currentStreak > monologuerStreaks[currentSender])) {
     monologuerStreaks[currentSender] = currentStreak;
   }
@@ -131,14 +125,12 @@ function calculateStats(messages: Message[]) {
     .map(([sender, count]) => ({ sender, messageCount: count }))
     .sort((a, b) => b.messageCount - a.messageCount);
 
-  // Icebreaker winner
   let icebreakerName = "";
   let icebreakerCount = 0;
   for (const [sender, count] of Object.entries(icebreakerCounts)) {
     if (count > icebreakerCount) { icebreakerCount = count; icebreakerName = sender; }
   }
 
-  // Monologuer winner
   let monologuerName = "";
   let monologuerStreak = 0;
   for (const [sender, streak] of Object.entries(monologuerStreaks)) {
@@ -197,9 +189,8 @@ function StatCard({
 }
 
 function AchievementCard({
-  emoji, title, name, stat, statLabel, flavor, isDark, accentColor = "#3b82f6",
+  title, name, stat, statLabel, flavor, isDark, accentColor = "#3b82f6",
 }: {
-  emoji: string;
   title: string;
   name: string;
   stat: string | number;
@@ -212,13 +203,11 @@ function AchievementCard({
     <div className={`relative overflow-hidden p-6 rounded-2xl border flex flex-col gap-3 transition-all duration-200 ${
       isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
     }`}>
-      {/* Decorative blur orb */}
       <div
         className="absolute -top-8 -right-8 w-32 h-32 rounded-full opacity-10 blur-2xl pointer-events-none"
         style={{ background: accentColor }}
       />
       <div className="flex items-center gap-3">
-        <span className="text-3xl">{emoji}</span>
         <span className="text-xs font-bold tracking-widest uppercase" style={{ color: accentColor }}>
           {title}
         </span>
@@ -298,10 +287,6 @@ export default function Dashboard({ data }: DashboardProps) {
       : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   };
 
-  const hourNum = s.busiestHour != null ? parseInt(String(s.busiestHour).split(":")[0]) : null;
-  const formatHour = (h: number) =>
-    h === 0 ? "12 AM" : h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`;
-
   const topTalkerPct = s.totalMessages
     ? ((userStats[0]?.messageCount / s.totalMessages) * 100).toFixed(1)
     : "0.0";
@@ -335,7 +320,6 @@ export default function Dashboard({ data }: DashboardProps) {
       isDark ? "bg-[#09090b] text-white" : "bg-[#fcfcfd] text-zinc-900"
     }`}>
 
-      {/* Header */}
       <div className="flex justify-between items-start mb-10">
         <div>
           <h1 className={`text-3xl md:text-4xl font-semibold tracking-tight mb-2 ${isDark ? "text-white" : "text-zinc-900"}`}>
@@ -397,7 +381,6 @@ export default function Dashboard({ data }: DashboardProps) {
         </div>
       </div>
 
-      {/* ── SECTION 1: OVERVIEW ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
         <StatCard
           icon={MessageSquare}
@@ -429,33 +412,71 @@ export default function Dashboard({ data }: DashboardProps) {
         />
       </div>
 
-      {/* Activity Chart */}
-      <div className={`border rounded-2xl p-6 flex flex-col mb-10 ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Activity by Hour</h2>
-            <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency across the day</p>
+      {/* Bento grid restored: Leaderboard (1 col) + Chart (2 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+        <div className={`border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Leaderboard</h2>
+              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>By message volume</p>
+            </div>
+            <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
+              {userStats.length} members
+            </span>
           </div>
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-              <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak hour</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${isDark ? "bg-white/20" : "bg-black/20"}`}></span>
-              <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Normal</span>
-            </div>
+          <div className="overflow-y-auto space-y-4 pr-2" style={{ maxHeight: 420 }}>
+            {userStats.slice(0, 50).map((u, i) => {
+              const pct = Math.round((u.messageCount / topCount) * 100);
+              return (
+                <div key={u.sender} className="group">
+                  <div className="flex items-center justify-between mb-2 gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                        {i + 1}
+                      </span>
+                      <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
+                        {u.sender}
+                      </span>
+                    </div>
+                    <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                      {u.messageCount.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
+                    <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
-        <div className="w-full min-h-[300px]">
-          <ActivityChart hourlyData={s.hourlyStats ?? Array(24).fill(0)} isDark={isDark} />
+
+        <div className={`lg:col-span-2 border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Activity by Hour</h2>
+              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency across the day</p>
+            </div>
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
+                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak hour</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${isDark ? "bg-white/20" : "bg-black/20"}`}></span>
+                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Normal</span>
+              </div>
+            </div>
+          </div>
+          <div className="w-full h-[320px] mt-2">
+            <ActivityChart hourlyData={s.hourlyStats ?? Array(24).fill(0)} isDark={isDark} />
+          </div>
         </div>
       </div>
 
-      {/* ── SECTION 2: HALL OF FAME ── */}
       <div className="mb-4 flex items-center gap-3">
         <h2 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
-          🏆 Hall of Fame
+          Hall of Fame
         </h2>
         <div className={`h-px flex-1 ${isDark ? "bg-white/5" : "bg-zinc-200"}`} />
       </div>
@@ -465,7 +486,6 @@ export default function Dashboard({ data }: DashboardProps) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
         <AchievementCard
-          emoji="👑"
           title="Top Talker"
           name={userStats[0]?.sender ?? "—"}
           stat={userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0}
@@ -475,7 +495,6 @@ export default function Dashboard({ data }: DashboardProps) {
           accentColor="#3b82f6"
         />
         <AchievementCard
-          emoji="👻"
           title="The Observer"
           name={bottomTalker?.sender ?? "—"}
           stat={bottomTalker?.messageCount?.toLocaleString("en-IN") ?? 0}
@@ -485,7 +504,6 @@ export default function Dashboard({ data }: DashboardProps) {
           accentColor="#a855f7"
         />
         <AchievementCard
-          emoji="🔥"
           title="The Icebreaker"
           name={s.icebreakerName ?? "—"}
           stat={s.icebreakerCount ?? 0}
@@ -495,7 +513,6 @@ export default function Dashboard({ data }: DashboardProps) {
           accentColor="#f97316"
         />
         <AchievementCard
-          emoji="💬"
           title="The Monologuer"
           name={s.monologuerName ?? "—"}
           stat={s.monologuerStreak ?? 0}
@@ -506,58 +523,17 @@ export default function Dashboard({ data }: DashboardProps) {
         />
       </div>
 
-      {/* Leaderboard */}
-      <div className={`border rounded-2xl p-6 flex flex-col ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Leaderboard</h2>
-            <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>By message volume</p>
-          </div>
-          <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
-            {userStats.length} members
-          </span>
-        </div>
-        <div className="overflow-y-auto space-y-4 pr-2" style={{ maxHeight: 420 }}>
-          {userStats.slice(0, 50).map((u, i) => {
-            const pct = Math.round((u.messageCount / topCount) * 100);
-            return (
-              <div key={u.sender} className="group">
-                <div className="flex items-center justify-between mb-2 gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                      {i < 3 ? medals[i] : i + 1}
-                    </span>
-                    <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
-                      {u.sender}
-                    </span>
-                  </div>
-                  <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                    {u.messageCount.toLocaleString("en-IN")}
-                  </span>
-                </div>
-                <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
-                  <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── HIDDEN EXPORT POSTER ── */}
       <div className="fixed left-[-9999px] top-0 pointer-events-none">
         <div
           ref={exportRef}
           className="w-[1080px] h-[1920px] bg-[#09090b] text-white flex flex-col font-sans relative overflow-hidden"
           style={{ padding: "56px" }}
         >
-          {/* Header */}
           <div className="mb-8">
             <h1 className="text-8xl font-black tracking-tighter mb-3 text-white uppercase">VIBECHECK</h1>
             <p className="text-3xl font-medium tracking-wide text-zinc-400">{posterDateLabel}</p>
           </div>
 
-          {/* Top macro stats */}
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8">
               <span className="text-2xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-3">Total Messages</span>
@@ -576,19 +552,16 @@ export default function Dashboard({ data }: DashboardProps) {
             </div>
           </div>
 
-          {/* Hall of Fame header */}
           <div className="flex items-center gap-4 mb-6">
-            <span className="text-3xl font-black tracking-widest uppercase text-white">🏆 Hall of Fame</span>
+            <span className="text-3xl font-black tracking-widest uppercase text-white">Hall of Fame</span>
             <div className="h-px flex-1 bg-white/10" />
           </div>
 
-          {/* 2x2 Achievement grid */}
           <div className="grid grid-cols-2 gap-6 flex-1">
-            {/* Top Talker */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#3b82f6" }} />
               <div>
-                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#3b82f6" }}>👑 Top Talker</span>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#3b82f6" }}>Top Talker</span>
                 <span className="text-[44px] font-black text-white leading-tight block truncate">{userStats[0]?.sender ?? "—"}</span>
               </div>
               <div>
@@ -600,11 +573,10 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
-            {/* The Observer */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#a855f7" }} />
               <div>
-                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#a855f7" }}>👻 The Observer</span>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#a855f7" }}>The Observer</span>
                 <span className="text-[44px] font-black text-white leading-tight block truncate">{bottomTalker?.sender ?? "—"}</span>
               </div>
               <div>
@@ -616,11 +588,10 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
-            {/* The Icebreaker */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#f97316" }} />
               <div>
-                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#f97316" }}>🔥 The Icebreaker</span>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#f97316" }}>The Icebreaker</span>
                 <span className="text-[44px] font-black text-white leading-tight block truncate">{s.icebreakerName ?? "—"}</span>
               </div>
               <div>
@@ -632,11 +603,10 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
-            {/* The Monologuer */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#10b981" }} />
               <div>
-                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#10b981" }}>💬 The Monologuer</span>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#10b981" }}>The Monologuer</span>
                 <span className="text-[44px] font-black text-white leading-tight block truncate">{s.monologuerName ?? "—"}</span>
               </div>
               <div>
@@ -649,7 +619,6 @@ export default function Dashboard({ data }: DashboardProps) {
             </div>
           </div>
 
-          {/* Footer */}
           <div className="pt-6 text-center">
             <p className="text-2xl font-bold tracking-widest uppercase text-zinc-700">
               Generated locally on VibeCheck
