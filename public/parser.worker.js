@@ -16,13 +16,16 @@ class WhatsAppParser {
     };
 
     const scores = {};
+    // Expanded to 50 lines to account for large multiline texts at the start of a file
+    const sampleLines = this.lines.slice(0, 50);
+    
     for (const [key, pattern] of Object.entries(patterns)) {
-      scores[key] = this.lines.slice(0, 20).filter(line => pattern.regex.test(line)).length;
+      scores[key] = sampleLines.filter(line => pattern.regex.test(line)).length;
     }
 
     const detected = Object.entries(scores).reduce((a, b) => scores[a[0]] > scores[b[0]] ? a : b)[0];
     const matchCount = scores[detected];
-    const confidence = (matchCount / Math.min(20, this.lines.length)) * 100;
+    const confidence = (matchCount / Math.min(50, this.lines.length)) * 100;
 
     this.detectedFormat = { key: detected, parser: patterns[detected].parser, confidence };
     return this.detectedFormat;
@@ -31,9 +34,12 @@ class WhatsAppParser {
   parse() {
     try {
       const format = this.detectFormat();
-      if (format.confidence < 50) this.errors.push(`Low confidence format (${format.confidence}%).`);
+      // Lowered threshold to 25% to prevent false-failures on chatty multiline groups
+      if (format.confidence < 25) this.errors.push(`Low confidence format (${format.confidence}%).`);
+      
       const messages = format.parser();
       const stats = this.aggregateStats(messages);
+      
       return { success: this.errors.length === 0, messages, stats, format: format.key, warnings: this.errors };
     } catch (error) {
       return { success: false, messages: [], stats: null, format: null, warnings: [error.message] };
@@ -124,46 +130,63 @@ class WhatsAppParser {
     const messages = [];
     let currentMessage = null;
     
-    // Regex handles M/D/YY or M/D/YYYY and the special invisible space before AM/PM
-    const timestampRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2})[\s\u202F]*([aApP][mM])\s+-\s+(.+?):\s+(.*)/;
-    const systemMessageRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2})[\s\u202F]*([aApP][mM])\s+-\s+(.+?)$/;
+    // Core regex to match the prefix exactly
+    const prefixRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2})[\s\u202F]*([aApP][mM])\s+-\s+(.*)/;
+    
+    // Known system notification keywords
+    const systemKeywords = [
+      "created group", "added you", "added", "removed", "left", 
+      "changed group description", "changed the subject", "changed this group's icon",
+      "Messages and calls are end-to-end encrypted", "changed their phone number", "joined using this group's invite link"
+    ];
 
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
-      
-      const match = line.match(timestampRegex);
+      if (!line.trim()) continue;
+
+      const match = line.match(prefixRegex);
+
       if (match) {
         if (currentMessage) messages.push(currentMessage);
-        const [, month, day, yearShort, hour, min, ampm, sender, text] = match;
+
+        const [, month, day, yearShort, hour, min, ampm, restOfLine] = match;
         const year = this.expandYearShort(parseInt(yearShort));
-        
+        const timestamp = this.parseTimestampIOS12h(month, day, year.toString(), hour, min, '00', ampm.toUpperCase());
+
+        const colonIndex = restOfLine.indexOf(": ");
+        let isSystem = true;
+        let sender = "[System]";
+        let text = restOfLine;
+
+        // If there is a colon, it's likely a standard text message
+        if (colonIndex !== -1) {
+          const tentativeSender = restOfLine.substring(0, colonIndex);
+          // Verify the sender name doesn't contain a system keyword (false positive prevention)
+          const matchesSystemAction = systemKeywords.some(keyword => tentativeSender.includes(keyword));
+          
+          if (!matchesSystemAction) {
+            isSystem = false;
+            sender = tentativeSender.trim();
+            text = restOfLine.substring(colonIndex + 2).trim();
+          }
+        }
+
+        // Final check for system messages
+        if (isSystem) {
+          isSystem = systemKeywords.some(keyword => restOfLine.includes(keyword)) || colonIndex === -1;
+        }
+
         currentMessage = {
-          timestamp: this.parseTimestampIOS12h(month, day, year.toString(), hour, min, '00', ampm.toUpperCase()),
-          sender: sender.trim(),
-          text: text.trim(),
+          timestamp,
+          sender,
+          text,
           isMedia: text.includes('<Media omitted>'),
-          isSystem: false
+          isSystem
         };
-        continue;
+      } else {
+        // Multi-line continuation
+        if (currentMessage) currentMessage.text += '\n' + line;
       }
-      
-      const sysMatch = line.match(systemMessageRegex);
-      if (sysMatch) {
-        if (currentMessage) messages.push(currentMessage);
-        const [, month, day, yearShort, hour, min, ampm, content] = sysMatch;
-        const year = this.expandYearShort(parseInt(yearShort));
-        
-        currentMessage = {
-          timestamp: this.parseTimestampIOS12h(month, day, year.toString(), hour, min, '00', ampm.toUpperCase()),
-          sender: '[System]',
-          text: content.trim(),
-          isMedia: false,
-          isSystem: true
-        };
-        continue;
-      }
-      
-      if (currentMessage && line.trim()) currentMessage.text += '\n' + line;
     }
     
     if (currentMessage) messages.push(currentMessage);
@@ -313,48 +336,111 @@ class WhatsAppParser {
   }
 
   aggregateStats(messages) {
-    const userStats = {};
-    const hourlyStats = Array(24).fill(0);
-    const dayStats = Array(7).fill(0);
-    let firstTimestamp = Infinity;
-    let lastTimestamp = -Infinity;
+    if (!messages || messages.length === 0) return {};
 
+    const userCounts = {};
+    const dayCounts = {};
+    const dateCounts = {};
+    const hourlyStats = Array(24).fill(0);
+    let validMessages = [];
+
+    // First pass: Filter system messages and calculate base counts
     for (const msg of messages) {
       if (msg.isSystem) continue;
-      if (!userStats[msg.sender]) {
-        userStats[msg.sender] = { messageCount: 0, firstSeen: msg.timestamp, lastSeen: msg.timestamp };
-      }
-      userStats[msg.sender].messageCount += 1;
-      userStats[msg.sender].lastSeen = Math.max(userStats[msg.sender].lastSeen, msg.timestamp);
+
+      validMessages.push(msg);
+
+      const sender = msg.sender;
+      userCounts[sender] = (userCounts[sender] || 0) + 1;
 
       const date = new Date(msg.timestamp);
-      hourlyStats[date.getHours()] += 1;
-      dayStats[date.getDay()] += 1;
-      firstTimestamp = Math.min(firstTimestamp, msg.timestamp);
-      lastTimestamp = Math.max(lastTimestamp, msg.timestamp);
+      if (!isNaN(date.getTime())) {
+        const day = date.toLocaleDateString("en-US", { weekday: "long" });
+        const hour = date.getHours();
+        
+        // Format as YYYY-MM-DD for accurate grouping
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+        dayCounts[day] = (dayCounts[day] || 0) + 1;
+        dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
+        hourlyStats[hour]++;
+      }
     }
 
-    const sortedUsers = Object.entries(userStats).map(([sender, stats]) => ({ sender, ...stats })).sort((a, b) => b.messageCount - a.messageCount);
-    const totalMessages = messages.filter(m => !m.isSystem).length;
-    const totalUsers = sortedUsers.length;
-    const avgPerUser = totalUsers > 0 ? (totalMessages / totalUsers).toFixed(1) : 0;
-    const daysActive = (lastTimestamp - firstTimestamp) / (1000 * 60 * 60 * 24);
-    const busiestHour = hourlyStats.indexOf(Math.max(...hourlyStats));
-    const busiestDay = dayStats.indexOf(Math.max(...dayStats));
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    if (validMessages.length === 0) return {};
+
+    validMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+    let maxGapMs = 0;
+    let totalGapMs = 0;
+    let gapCount = 0;
+
+    for (let i = 1; i < validMessages.length; i++) {
+      const gap = validMessages[i].timestamp - validMessages[i - 1].timestamp;
+      if (gap > maxGapMs) maxGapMs = gap;
+      totalGapMs += gap;
+      gapCount++;
+    }
+
+    const formatDuration = (ms) => {
+      const hours = ms / (1000 * 60 * 60);
+      if (hours > 24) {
+        return `${Math.round(hours / 24)} Days`;
+      }
+      return hours < 1 ? `${Math.round(hours * 60)} Mins` : `${hours.toFixed(1)} Hours`;
+    };
+
+    const longestSilence = maxGapMs > 0 ? formatDuration(maxGapMs) : "—";
+    const avgResponseTime = gapCount > 0 ? formatDuration(totalGapMs / gapCount) : "—";
+
+    let busiestDay = "";
+    let maxDayCount = 0;
+    for (const [day, count] of Object.entries(dayCounts)) {
+      if (count > maxDayCount) {
+        maxDayCount = count;
+        busiestDay = day;
+      }
+    }
+    
+    let busiestDate = "";
+    let busiestDateCount = 0;
+    for (const [dateKey, count] of Object.entries(dateCounts)) {
+      if (count > busiestDateCount) {
+        busiestDateCount = count;
+        busiestDate = dateKey;
+      }
+    }
+
+    let busiestHour = 0;
+    let maxHourCount = 0;
+    for (let i = 0; i < 24; i++) {
+      if (hourlyStats[i] > maxHourCount) {
+        maxHourCount = hourlyStats[i];
+        busiestHour = i;
+      }
+    }
+
+    const userStats = Object.entries(userCounts)
+      .map(([sender, count]) => ({ sender, messageCount: count }))
+      .sort((a, b) => b.messageCount - a.messageCount);
+
+    const totalMessages = validMessages.length;
+    const totalUsers = userStats.length;
 
     return {
       totalMessages,
       totalUsers,
-      avgPerUser,
-      daysActive: daysActive.toFixed(1),
-      busiestHour: `${busiestHour}:00`,
-      busiestDay: dayNames[busiestDay],
-      firstMessage: new Date(firstTimestamp).toLocaleDateString(),
-      lastMessage: new Date(lastTimestamp).toLocaleDateString(),
-      userStats: sortedUsers,
+      avgPerUser: totalUsers > 0 ? totalMessages / totalUsers : 0,
+      firstMessage: validMessages[0].timestamp,
+      lastMessage: validMessages[validMessages.length - 1].timestamp,
+      busiestDay,
+      busiestHour,
+      busiestDate,
+      busiestDateCount,
       hourlyStats,
-      dayStats,
+      userStats,
+      longestSilence,
+      avgResponseTime
     };
   }
 }
