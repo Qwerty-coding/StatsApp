@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useMemo } from "react";
-import { MessageSquare, Calendar, Activity, Sun, Moon, Download, Flame, ChevronDown } from "lucide-react";
+import { MessageSquare, Calendar, Activity, Sun, Moon, Download, Flame, ChevronDown, Ghost } from "lucide-react";
 import ActivityChart from "./ActivityChart";
 import { toPng } from "html-to-image";
 
@@ -59,11 +59,42 @@ function calculateStats(messages: Message[]) {
   let totalGapMs = 0;
   let gapCount = 0;
 
+  // Icebreaker: tally who sent the first message after 6+ hour silence
+  const icebreakerCounts: Record<string, number> = {};
+  const SIX_HOURS = 21_600_000;
+
+  // Monologuer: longest consecutive streak
+  const monologuerStreaks: Record<string, number> = {};
+  let currentStreak = 1;
+  let currentSender = validMessages[0]?.sender ?? "";
+
   for (let i = 1; i < validMessages.length; i++) {
     const gap = validMessages[i].timestamp - validMessages[i - 1].timestamp;
     if (gap > maxGapMs) maxGapMs = gap;
     totalGapMs += gap;
     gapCount++;
+
+    // Icebreaker
+    if (gap > SIX_HOURS) {
+      const reviver = validMessages[i].sender;
+      icebreakerCounts[reviver] = (icebreakerCounts[reviver] || 0) + 1;
+    }
+
+    // Monologuer
+    if (validMessages[i].sender === currentSender) {
+      currentStreak++;
+    } else {
+      const prev = validMessages[i - 1].sender;
+      if (!monologuerStreaks[prev] || currentStreak > monologuerStreaks[prev]) {
+        monologuerStreaks[prev] = currentStreak;
+      }
+      currentStreak = 1;
+      currentSender = validMessages[i].sender;
+    }
+  }
+  // Flush final streak
+  if (currentSender && (!monologuerStreaks[currentSender] || currentStreak > monologuerStreaks[currentSender])) {
+    monologuerStreaks[currentSender] = currentStreak;
   }
 
   const formatDuration = (ms: number) => {
@@ -83,8 +114,11 @@ function calculateStats(messages: Message[]) {
 
   let busiestDate = "";
   let busiestDateCount = 0;
+  let ghostTownDate = "";
+  let ghostTownCount = Infinity;
   for (const [dateKey, count] of Object.entries(dateCounts)) {
     if (count > busiestDateCount) { busiestDateCount = count; busiestDate = dateKey; }
+    if (count < ghostTownCount) { ghostTownCount = count; ghostTownDate = dateKey; }
   }
 
   let busiestHour = 0;
@@ -96,6 +130,20 @@ function calculateStats(messages: Message[]) {
   const userStats = Object.entries(userCounts)
     .map(([sender, count]) => ({ sender, messageCount: count }))
     .sort((a, b) => b.messageCount - a.messageCount);
+
+  // Icebreaker winner
+  let icebreakerName = "";
+  let icebreakerCount = 0;
+  for (const [sender, count] of Object.entries(icebreakerCounts)) {
+    if (count > icebreakerCount) { icebreakerCount = count; icebreakerName = sender; }
+  }
+
+  // Monologuer winner
+  let monologuerName = "";
+  let monologuerStreak = 0;
+  for (const [sender, streak] of Object.entries(monologuerStreaks)) {
+    if (streak > monologuerStreak) { monologuerStreak = streak; monologuerName = sender; }
+  }
 
   const totalMessages = validMessages.length;
   const totalUsers = userStats.length;
@@ -110,10 +158,16 @@ function calculateStats(messages: Message[]) {
     busiestHour,
     busiestDate,
     busiestDateCount,
+    ghostTownDate,
+    ghostTownCount: ghostTownCount === Infinity ? 0 : ghostTownCount,
     hourlyStats,
     userStats,
     longestSilence,
     avgResponseTime,
+    icebreakerName,
+    icebreakerCount,
+    monologuerName,
+    monologuerStreak,
   };
 }
 
@@ -142,6 +196,51 @@ function StatCard({
   );
 }
 
+function AchievementCard({
+  emoji, title, name, stat, statLabel, flavor, isDark, accentColor = "#3b82f6",
+}: {
+  emoji: string;
+  title: string;
+  name: string;
+  stat: string | number;
+  statLabel: string;
+  flavor: string;
+  isDark: boolean;
+  accentColor?: string;
+}) {
+  return (
+    <div className={`relative overflow-hidden p-6 rounded-2xl border flex flex-col gap-3 transition-all duration-200 ${
+      isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
+    }`}>
+      {/* Decorative blur orb */}
+      <div
+        className="absolute -top-8 -right-8 w-32 h-32 rounded-full opacity-10 blur-2xl pointer-events-none"
+        style={{ background: accentColor }}
+      />
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">{emoji}</span>
+        <span className="text-xs font-bold tracking-widest uppercase" style={{ color: accentColor }}>
+          {title}
+        </span>
+      </div>
+      <div className={`text-xl font-bold truncate ${isDark ? "text-white" : "text-zinc-900"}`}>
+        {name || "—"}
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-4xl font-black tracking-tight" style={{ color: accentColor }}>
+          {stat}
+        </span>
+        <span className={`text-sm font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+          {statLabel}
+        </span>
+      </div>
+      <p className={`text-xs leading-relaxed ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+        {flavor}
+      </p>
+    </div>
+  );
+}
+
 export default function Dashboard({ data }: DashboardProps) {
   const [isDark, setIsDark] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
@@ -150,7 +249,6 @@ export default function Dashboard({ data }: DashboardProps) {
 
   const allMessages: Message[] = data?.messages ?? [];
 
-  // Build filter options from all messages
   const filterOptions = useMemo(() => {
     const yearSet = new Set<string>();
     const monthMap = new Map<string, { label: string; sortKey: string }>();
@@ -172,31 +270,21 @@ export default function Dashboard({ data }: DashboardProps) {
 
     const years = Array.from(yearSet).sort();
     const months = Array.from(monthMap.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-
     return { years, months };
   }, [allMessages]);
 
-  // Filter messages based on selected timeFilter
   const filteredMessages = useMemo(() => {
     if (timeFilter === "all") return allMessages;
-
     return allMessages.filter((msg) => {
       if (msg.isSystem) return false;
       const d = new Date(msg.timestamp);
       if (isNaN(d.getTime())) return false;
-
-      if (timeFilter.length === 4) {
-        // Year filter e.g. "2024"
-        return String(d.getFullYear()) === timeFilter;
-      } else {
-        // Month filter e.g. "2024-11"
-        const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        return monthKey === timeFilter;
-      }
+      if (timeFilter.length === 4) return String(d.getFullYear()) === timeFilter;
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return monthKey === timeFilter;
     });
   }, [allMessages, timeFilter]);
 
-  // Recalculate stats from filtered messages
   const s: any = useMemo(() => calculateStats(filteredMessages), [filteredMessages]);
 
   const userStats: Array<{ sender: string; messageCount: number }> = s.userStats ?? [];
@@ -214,27 +302,14 @@ export default function Dashboard({ data }: DashboardProps) {
   const formatHour = (h: number) =>
     h === 0 ? "12 AM" : h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`;
 
-  const peakHourOnly = hourNum != null ? formatHour(hourNum) : "—";
-  const peakSubtext = s.busiestDay ? `Usually on ${s.busiestDay}s` : "peak activity window";
-
-  const busiestDateFormatted = s.busiestDate ? fmt(s.busiestDate) : "—";
-  const busiestDateSubtext = s.busiestDateCount
-    ? `${s.busiestDateCount.toLocaleString("en-IN")} messages`
-    : "peak daily volume";
-
   const topTalkerPct = s.totalMessages
     ? ((userStats[0]?.messageCount / s.totalMessages) * 100).toFixed(1)
     : "0.0";
-  const topTalkerName = userStats[0]?.sender ?? "Someone";
   const bottomTalker = userStats.length > 1 ? userStats[userStats.length - 1] : null;
 
-  // Poster date range label
   const posterDateLabel = useMemo(() => {
-    if (timeFilter === "all") {
-      return `${fmt(s.firstMessage)} — ${fmt(s.lastMessage)}`;
-    }
+    if (timeFilter === "all") return `${fmt(s.firstMessage)} — ${fmt(s.lastMessage)}`;
     if (timeFilter.length === 4) return `${timeFilter} Wrapped`;
-    // Month filter: find the label
     const match = filterOptions.months.find((m) => m.sortKey === timeFilter);
     return match ? `${match.label} Wrapped` : `${timeFilter} Wrapped`;
   }, [timeFilter, s.firstMessage, s.lastMessage, filterOptions.months]);
@@ -272,7 +347,6 @@ export default function Dashboard({ data }: DashboardProps) {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap justify-end">
-          {/* Time Slicer Dropdown */}
           <div className="relative">
             <select
               value={timeFilter}
@@ -323,7 +397,7 @@ export default function Dashboard({ data }: DashboardProps) {
         </div>
       </div>
 
-      {/* Top stats row */}
+      {/* ── SECTION 1: OVERVIEW ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
         <StatCard
           icon={MessageSquare}
@@ -335,198 +409,249 @@ export default function Dashboard({ data }: DashboardProps) {
         <StatCard
           icon={Flame}
           label="Busiest Date"
-          value={busiestDateFormatted}
-          sub={busiestDateSubtext}
+          value={s.busiestDate ? fmt(s.busiestDate) : "—"}
+          sub={s.busiestDateCount ? `${s.busiestDateCount.toLocaleString("en-IN")} messages` : undefined}
           isDark={isDark}
         />
         <StatCard
-          icon={Calendar}
-          label="Longest Silence"
-          value={s.longestSilence ?? "—"}
-          sub="Max time without a text"
+          icon={Ghost}
+          label="Ghost Town"
+          value={s.ghostTownDate ? fmt(s.ghostTownDate) : "—"}
+          sub={s.ghostTownCount != null ? `Only ${s.ghostTownCount} message${s.ghostTownCount === 1 ? "" : "s"} sent` : undefined}
           isDark={isDark}
         />
         <StatCard
           icon={Activity}
-          label="Peak Time"
-          value={peakHourOnly}
-          sub={peakSubtext}
+          label="Avg Response Time"
+          value={s.avgResponseTime ?? "—"}
+          sub="Average gap between messages"
           isDark={isDark}
         />
       </div>
 
-      {/* Highlights Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-        <div className={`p-6 rounded-2xl border flex flex-col justify-center ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <span className="text-xs font-bold tracking-wider uppercase mb-2 text-[#3b82f6]">Top Talker</span>
-          <p className={`text-sm leading-relaxed ${isDark ? "text-zinc-300" : "text-zinc-600"}`}>
-            <span className={`font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>{topTalkerName}</span>{" "}
-            dominated the chat with {userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0} messages ({topTalkerPct}% of all texts).
-          </p>
+      {/* Activity Chart */}
+      <div className={`border rounded-2xl p-6 flex flex-col mb-10 ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Activity by Hour</h2>
+            <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency across the day</p>
+          </div>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
+              <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak hour</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${isDark ? "bg-white/20" : "bg-black/20"}`}></span>
+              <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Normal</span>
+            </div>
+          </div>
         </div>
-
-        <div className={`p-6 rounded-2xl border flex flex-col justify-center ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <span className="text-xs font-bold tracking-wider uppercase mb-2 text-[#3b82f6]">Pure Chaos</span>
-          <p className={`text-sm leading-relaxed ${isDark ? "text-zinc-300" : "text-zinc-600"}`}>
-            Your group's busiest day of the week was a{" "}
-            <span className={`font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>{s.busiestDay ?? "—"}</span>. No one was going to sleep early that day.
-          </p>
-        </div>
-
-        <div className={`p-6 rounded-2xl border flex flex-col justify-center ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <span className="text-xs font-bold tracking-wider uppercase mb-2 text-[#3b82f6]">Response Time</span>
-          <p className={`text-sm leading-relaxed ${isDark ? "text-zinc-300" : "text-zinc-600"}`}>
-            Group average response time:{" "}
-            <span className={`font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>{s.avgResponseTime ?? "—"}</span>. That's how long it takes to rescue a dying conversation.
-          </p>
-        </div>
-
-        <div className={`p-6 rounded-2xl border flex flex-col justify-center ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <span className="text-xs font-bold tracking-wider uppercase mb-2 text-[#3b82f6]">The Observer</span>
-          <p className={`text-sm leading-relaxed ${isDark ? "text-zinc-300" : "text-zinc-600"}`}>
-            <span className={`font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>
-              {bottomTalker ? bottomTalker.sender : "Nobody"}
-            </span>{" "}
-            was the quietest, sending only {bottomTalker ? bottomTalker.messageCount.toLocaleString("en-IN") : 0}{" "}
-            {bottomTalker && bottomTalker.messageCount === 1 ? "message" : "messages"} total.
-          </p>
+        <div className="w-full min-h-[300px]">
+          <ActivityChart hourlyData={s.hourlyStats ?? Array(24).fill(0)} isDark={isDark} />
         </div>
       </div>
 
-      {/* Bento grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Leaderboard */}
-        <div className={`border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Leaderboard</h2>
-              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>By message volume</p>
-            </div>
-            <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
-              {userStats.length} members
-            </span>
+      {/* ── SECTION 2: HALL OF FAME ── */}
+      <div className="mb-4 flex items-center gap-3">
+        <h2 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
+          🏆 Hall of Fame
+        </h2>
+        <div className={`h-px flex-1 ${isDark ? "bg-white/5" : "bg-zinc-200"}`} />
+      </div>
+      <p className={`text-sm mb-6 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+        Lifetime achievements, unlocked by data.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+        <AchievementCard
+          emoji="👑"
+          title="Top Talker"
+          name={userStats[0]?.sender ?? "—"}
+          stat={userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0}
+          statLabel="messages sent"
+          flavor={`That's ${topTalkerPct}% of everything ever said in this chat. Absolutely unhinged.`}
+          isDark={isDark}
+          accentColor="#3b82f6"
+        />
+        <AchievementCard
+          emoji="👻"
+          title="The Observer"
+          name={bottomTalker?.sender ?? "—"}
+          stat={bottomTalker?.messageCount?.toLocaleString("en-IN") ?? 0}
+          statLabel={`message${bottomTalker?.messageCount === 1 ? "" : "s"} total`}
+          flavor="Lurking in the shadows. Watching. Never texting back. A legend of restraint."
+          isDark={isDark}
+          accentColor="#a855f7"
+        />
+        <AchievementCard
+          emoji="🔥"
+          title="The Icebreaker"
+          name={s.icebreakerName ?? "—"}
+          stat={s.icebreakerCount ?? 0}
+          statLabel="revivals"
+          flavor="Swooped in to rescue the chat after 6+ hours of dead silence. The unsung hero."
+          isDark={isDark}
+          accentColor="#f97316"
+        />
+        <AchievementCard
+          emoji="💬"
+          title="The Monologuer"
+          name={s.monologuerName ?? "—"}
+          stat={s.monologuerStreak ?? 0}
+          statLabel="in a row"
+          flavor="Double-texting champion. Triple. Quadruple. Nobody replied but they kept going."
+          isDark={isDark}
+          accentColor="#10b981"
+        />
+      </div>
+
+      {/* Leaderboard */}
+      <div className={`border rounded-2xl p-6 flex flex-col ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Leaderboard</h2>
+            <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>By message volume</p>
           </div>
-          <div className="overflow-y-auto flex-1 space-y-4 pr-2" style={{ maxHeight: 420 }}>
-            {userStats.slice(0, 50).map((u, i) => {
-              const pct = Math.round((u.messageCount / topCount) * 100);
-              return (
-                <div key={u.sender} className="group">
-                  <div className="flex items-center justify-between mb-2 gap-2">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                        {i < 3 ? medals[i] : i + 1}
-                      </span>
-                      <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
-                        {u.sender}
-                      </span>
-                    </div>
-                    <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                      {u.messageCount.toLocaleString("en-IN")}
+          <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
+            {userStats.length} members
+          </span>
+        </div>
+        <div className="overflow-y-auto space-y-4 pr-2" style={{ maxHeight: 420 }}>
+          {userStats.slice(0, 50).map((u, i) => {
+            const pct = Math.round((u.messageCount / topCount) * 100);
+            return (
+              <div key={u.sender} className="group">
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                      {i < 3 ? medals[i] : i + 1}
+                    </span>
+                    <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
+                      {u.sender}
                     </span>
                   </div>
-                  <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
-                    <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
-                  </div>
+                  <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                    {u.messageCount.toLocaleString("en-IN")}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Activity Chart */}
-        <div className={`lg:col-span-2 border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Activity by Hour</h2>
-              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency across the day</p>
-            </div>
-            <div className="flex gap-4">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak hour</span>
+                <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
+                  <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${isDark ? "bg-white/20" : "bg-black/20"}`}></span>
-                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Normal</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 w-full min-h-[300px]">
-            <ActivityChart hourlyData={s.hourlyStats ?? Array(24).fill(0)} isDark={isDark} />
-          </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Hidden Export Poster */}
+      {/* ── HIDDEN EXPORT POSTER ── */}
       <div className="fixed left-[-9999px] top-0 pointer-events-none">
         <div
           ref={exportRef}
-          className="w-[1080px] h-[1920px] bg-[#09090b] text-white flex flex-col font-sans relative"
-          style={{ padding: "60px" }}
+          className="w-[1080px] h-[1920px] bg-[#09090b] text-white flex flex-col font-sans relative overflow-hidden"
+          style={{ padding: "56px" }}
         >
-          <div className="mt-4">
-            <h1 className="text-8xl font-black tracking-tighter mb-4 text-white uppercase">VIBECHECK</h1>
-            <p className="text-4xl font-medium tracking-wide text-zinc-400">{posterDateLabel}</p>
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-8xl font-black tracking-tighter mb-3 text-white uppercase">VIBECHECK</h1>
+            <p className="text-3xl font-medium tracking-wide text-zinc-400">{posterDateLabel}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-8 my-10">
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-4">Total Messages</span>
-              <span className="text-[110px] leading-none font-black tracking-tighter text-white block">
+          {/* Top macro stats */}
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8">
+              <span className="text-2xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-3">Total Messages</span>
+              <span className="text-[96px] leading-none font-black tracking-tighter text-white block">
                 {s.totalMessages?.toLocaleString("en-IN") ?? "—"}
               </span>
             </div>
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-4">Busiest Date</span>
-              <span className="text-[65px] leading-tight font-black tracking-tighter text-white block">
-                {busiestDateFormatted}
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8">
+              <span className="text-2xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-3">Busiest Date</span>
+              <span className="text-[56px] leading-tight font-black tracking-tighter text-white block">
+                {s.busiestDate ? fmt(s.busiestDate) : "—"}
               </span>
-              <span className="text-2xl mt-3 font-medium text-zinc-400 block">{busiestDateSubtext}</span>
+              <span className="text-xl mt-2 font-medium text-zinc-400 block">
+                {s.busiestDateCount ? `${s.busiestDateCount.toLocaleString("en-IN")} messages` : ""}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-8 flex-1">
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Top Talker</span>
-              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
-                <span className="font-bold text-white text-[56px]">{topTalkerName}</span><br /><br />
-                Dominated the chat with{" "}
-                <span className="text-[#3b82f6] font-bold">{userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0}</span>{" "}
-                messages ({topTalkerPct}% of all texts).
-              </p>
+          {/* Hall of Fame header */}
+          <div className="flex items-center gap-4 mb-6">
+            <span className="text-3xl font-black tracking-widest uppercase text-white">🏆 Hall of Fame</span>
+            <div className="h-px flex-1 bg-white/10" />
+          </div>
+
+          {/* 2x2 Achievement grid */}
+          <div className="grid grid-cols-2 gap-6 flex-1">
+            {/* Top Talker */}
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#3b82f6" }} />
+              <div>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#3b82f6" }}>👑 Top Talker</span>
+                <span className="text-[44px] font-black text-white leading-tight block truncate">{userStats[0]?.sender ?? "—"}</span>
+              </div>
+              <div>
+                <span className="text-[72px] font-black leading-none" style={{ color: "#3b82f6" }}>
+                  {userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0}
+                </span>
+                <span className="text-xl font-medium text-zinc-400 ml-3">messages sent</span>
+                <p className="text-lg text-zinc-500 mt-2">{topTalkerPct}% of all chat. Absolutely unhinged.</p>
+              </div>
             </div>
 
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Pure Chaos</span>
-              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
-                Your group's busiest day of the week was a{" "}
-                <span className="font-bold text-white text-[56px]">{s.busiestDay ?? "—"}</span>.<br /><br />
-                No one was going to sleep early that day.
-              </p>
+            {/* The Observer */}
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#a855f7" }} />
+              <div>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#a855f7" }}>👻 The Observer</span>
+                <span className="text-[44px] font-black text-white leading-tight block truncate">{bottomTalker?.sender ?? "—"}</span>
+              </div>
+              <div>
+                <span className="text-[72px] font-black leading-none" style={{ color: "#a855f7" }}>
+                  {bottomTalker?.messageCount?.toLocaleString("en-IN") ?? 0}
+                </span>
+                <span className="text-xl font-medium text-zinc-400 ml-3">messages total</span>
+                <p className="text-lg text-zinc-500 mt-2">Lurking. Watching. Never texting back.</p>
+              </div>
             </div>
 
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Response Time</span>
-              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
-                Group average response time:<br /><br />
-                <span className="font-bold text-white text-[56px]">{s.avgResponseTime ?? "—"}</span>.<br /><br />
-                That's how long it takes to rescue a dying conversation.
-              </p>
+            {/* The Icebreaker */}
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#f97316" }} />
+              <div>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#f97316" }}>🔥 The Icebreaker</span>
+                <span className="text-[44px] font-black text-white leading-tight block truncate">{s.icebreakerName ?? "—"}</span>
+              </div>
+              <div>
+                <span className="text-[72px] font-black leading-none" style={{ color: "#f97316" }}>
+                  {s.icebreakerCount ?? 0}
+                </span>
+                <span className="text-xl font-medium text-zinc-400 ml-3">revivals</span>
+                <p className="text-lg text-zinc-500 mt-2">Saved the chat after 6+ hours of silence.</p>
+              </div>
             </div>
 
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">The Observer</span>
-              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
-                <span className="font-bold text-white text-[56px]">{bottomTalker ? bottomTalker.sender : "Nobody"}</span><br /><br />
-                was the quietest, sending only{" "}
-                <span className="text-[#3b82f6] font-bold">{bottomTalker ? bottomTalker.messageCount : 0}</span>{" "}
-                {bottomTalker && bottomTalker.messageCount === 1 ? "message" : "messages"} total.
-              </p>
+            {/* The Monologuer */}
+            <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#10b981" }} />
+              <div>
+                <span className="text-xl font-bold tracking-widest uppercase block mb-2" style={{ color: "#10b981" }}>💬 The Monologuer</span>
+                <span className="text-[44px] font-black text-white leading-tight block truncate">{s.monologuerName ?? "—"}</span>
+              </div>
+              <div>
+                <span className="text-[72px] font-black leading-none" style={{ color: "#10b981" }}>
+                  {s.monologuerStreak ?? 0}
+                </span>
+                <span className="text-xl font-medium text-zinc-400 ml-3">in a row</span>
+                <p className="text-lg text-zinc-500 mt-2">Nobody replied but they kept going.</p>
+              </div>
             </div>
           </div>
 
-          <div className="mt-auto pt-8 pb-4 text-center">
-            <p className="text-[32px] font-bold tracking-widest uppercase text-zinc-600">
+          {/* Footer */}
+          <div className="pt-6 text-center">
+            <p className="text-2xl font-bold tracking-widest uppercase text-zinc-700">
               Generated locally on VibeCheck
             </p>
           </div>
