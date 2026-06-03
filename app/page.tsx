@@ -7,6 +7,7 @@ export default function Home() {
   const [filename, setFilename] = useState<string>("");
   const workerRef = useRef<Worker | null>(null);
   const [parsedData, setParsedData] = useState<any>(null);
+  
   const processFile = useCallback((file: File) => {
     if (!file.name.endsWith(".txt")) {
       setStatus("error");
@@ -25,9 +26,9 @@ export default function Home() {
         console.log("Worker result:", event.data);
         setStatus("done");
         if (event.data.success) {
-        setParsedData(event.data);
-        setStatus("done");
-}
+          setParsedData(event.data);
+          setStatus("done");
+        }
         worker.terminate();
       };
 
@@ -65,9 +66,11 @@ export default function Home() {
     done: `✓ Done — check console for output (${filename})`,
     error: "Something went wrong — make sure it's a .txt file",
   };
+  
   if (parsedData) {
-   return <Dashboard data={parsedData} />;
-}
+    return <Dashboard data={parsedData} />;
+  }
+  
   return (
     <main className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
@@ -120,6 +123,15 @@ export default function Home() {
               <p className="text-zinc-600 text-xs">or click to browse</p>
             )}
           </div>
+        </div>
+
+        {/* Privacy Statement */}
+        <div className="mt-6 flex items-center justify-center gap-2 text-sm font-medium text-zinc-500">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#3b82f6]">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <span>Your file never leaves your browser. All analysis is 100% local.</span>
         </div>
 
         <p className="text-zinc-700 text-xs text-center mt-6">
