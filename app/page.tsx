@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
+import Dashboard from "./Dashboard";
 
 export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [filename, setFilename] = useState<string>("");
   const workerRef = useRef<Worker | null>(null);
-
+  const [parsedData, setParsedData] = useState<any>(null);
   const processFile = useCallback((file: File) => {
     if (!file.name.endsWith(".txt")) {
       setStatus("error");
@@ -23,6 +24,10 @@ export default function Home() {
       worker.onmessage = (event) => {
         console.log("Worker result:", event.data);
         setStatus("done");
+        if (event.data.success) {
+        setParsedData(event.data);
+        setStatus("done");
+}
         worker.terminate();
       };
 
@@ -60,7 +65,9 @@ export default function Home() {
     done: `✓ Done — check console for output (${filename})`,
     error: "Something went wrong — make sure it's a .txt file",
   };
-
+  if (parsedData) {
+   return <Dashboard data={parsedData} />;
+}
   return (
     <main className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
