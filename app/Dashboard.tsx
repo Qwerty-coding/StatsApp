@@ -267,77 +267,77 @@ export default function Dashboard({ data }: DashboardProps) {
       <div className="fixed left-[-9999px] top-0 pointer-events-none">
         <div 
           ref={exportRef} 
-          className="w-[1080px] h-[1920px] bg-[#09090b] text-white flex flex-col justify-between font-sans relative overflow-hidden" 
-          style={{ padding: '80px' }}
+          className="w-[1080px] h-[1920px] bg-[#09090b] text-white flex flex-col font-sans relative" 
+          style={{ padding: '60px' }}
         >
           {/* Header */}
-          <div className="mt-10">
-            <h1 className="text-8xl font-black tracking-tighter mb-6 text-white uppercase">VIBECHECK</h1>
+          <div className="mt-4">
+            <h1 className="text-8xl font-black tracking-tighter mb-4 text-white uppercase">VIBECHECK</h1>
             <p className="text-4xl font-medium tracking-wide text-zinc-400">
               {fmt(s.firstMessage)} — {fmt(s.lastMessage)}
             </p>
           </div>
 
           {/* Big Stats Row */}
-          <div className="grid grid-cols-2 gap-12 mt-16 mb-16">
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-6">Total Messages</span>
-              <span className="text-[120px] leading-none font-black tracking-tighter text-white block">
+          <div className="grid grid-cols-2 gap-8 my-10">
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-4">Total Messages</span>
+              <span className="text-[110px] leading-none font-black tracking-tighter text-white block">
                 {s.totalMessages?.toLocaleString("en-IN") ?? "—"}
               </span>
             </div>
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-6">Busiest Date</span>
-              <span className="text-[75px] leading-tight font-black tracking-tighter text-white block">
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] block mb-4">Busiest Date</span>
+              <span className="text-[65px] leading-tight font-black tracking-tighter text-white block">
                 {busiestDateFormatted}
               </span>
-              <span className="text-2xl mt-4 font-medium text-zinc-400 block">{busiestDateSubtext}</span>
+              <span className="text-2xl mt-3 font-medium text-zinc-400 block">{busiestDateSubtext}</span>
             </div>
           </div>
 
           {/* 2x2 Highlights Grid */}
-          <div className="grid grid-cols-2 gap-12 flex-1">
+          <div className="grid grid-cols-2 gap-8 flex-1">
             {/* Top Talker */}
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-10">Top Talker</span>
-              <p className="text-5xl leading-[1.4] text-zinc-300 font-medium">
-                <span className="font-bold text-white text-6xl">{topTalkerName}</span><br/><br/>
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Top Talker</span>
+              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
+                <span className="font-bold text-white text-[56px]">{topTalkerName}</span><br/><br/>
                 Dominated the chat with <span className="text-[#3b82f6] font-bold">{userStats[0]?.messageCount?.toLocaleString("en-IN") ?? 0}</span> messages ({topTalkerPct}% of all texts).
               </p>
             </div>
             
             {/* Pure Chaos */}
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-10">Pure Chaos</span>
-              <p className="text-5xl leading-[1.4] text-zinc-300 font-medium">
-                Your group's busiest day of the week was a <span className="font-bold text-white text-6xl">{s.busiestDay ?? "—"}</span>.<br/><br/>
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Pure Chaos</span>
+              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
+                Your group's busiest day of the week was a <span className="font-bold text-white text-[56px]">{s.busiestDay ?? "—"}</span>.<br/><br/>
                 No one was going to sleep early that day.
               </p>
             </div>
             
             {/* Response Time */}
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-10">Response Time</span>
-              <p className="text-5xl leading-[1.4] text-zinc-300 font-medium">
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">Response Time</span>
+              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
                 Group average response time:<br/><br/>
-                <span className="font-bold text-white text-6xl">{s.avgResponseTime ?? "—"}</span>.<br/><br/>
+                <span className="font-bold text-white text-[56px]">{s.avgResponseTime ?? "—"}</span>.<br/><br/>
                 That's how long it takes to rescue a dying conversation.
               </p>
             </div>
             
             {/* The Observer */}
-            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-12 flex flex-col justify-center">
-              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-10">The Observer</span>
-              <p className="text-5xl leading-[1.4] text-zinc-300 font-medium">
-                <span className="font-bold text-white text-6xl">{bottomTalker ? bottomTalker.sender : "Nobody"}</span><br/><br/>
+            <div className="bg-[#121214] border border-white/10 rounded-[40px] p-10 flex flex-col justify-center">
+              <span className="text-3xl font-bold tracking-widest uppercase text-[#3b82f6] mb-8">The Observer</span>
+              <p className="text-[42px] leading-[1.4] text-zinc-300 font-medium">
+                <span className="font-bold text-white text-[56px]">{bottomTalker ? bottomTalker.sender : "Nobody"}</span><br/><br/>
                 was the quietest, sending only <span className="text-[#3b82f6] font-bold">{bottomTalker ? bottomTalker.messageCount : 0}</span> messages total.
               </p>
             </div>
           </div>
 
           {/* Footer */}
-          <div className="mt-16 pb-10 text-center">
-            <p className="text-4xl font-bold tracking-widest uppercase text-zinc-600">
+          <div className="mt-auto pt-8 pb-4 text-center">
+            <p className="text-[32px] font-bold tracking-widest uppercase text-zinc-600">
               Generated locally on VibeCheck
             </p>
           </div>
