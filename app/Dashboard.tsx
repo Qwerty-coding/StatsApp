@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useMemo } from "react";
-import { MessageSquare, Calendar, Activity, Sun, Moon, Download, Flame, ChevronDown, Ghost } from "lucide-react";
+import { MessageSquare, Calendar, Activity, Sun, Moon, Download, Flame, ChevronDown, Zap } from "lucide-react";
 import ActivityChart from "./ActivityChart";
 import { toPng } from "html-to-image";
 
@@ -64,18 +64,25 @@ function calculateStats(messages: Message[]) {
   let currentStreak = 1;
   let currentSender = validMessages[0]?.sender ?? "";
 
+  // For Speed Demon calculation
+  const userGaps: Record<string, { totalMs: number; count: number }> = {};
+
   for (let i = 1; i < validMessages.length; i++) {
     const gap = validMessages[i].timestamp - validMessages[i - 1].timestamp;
     if (gap > maxGapMs) maxGapMs = gap;
     totalGapMs += gap;
     gapCount++;
 
+    const currentMsgSender = validMessages[i].sender;
+    const prevMsgSender = validMessages[i - 1].sender;
+
+    // Icebreaker
     if (gap > SIX_HOURS) {
-      const reviver = validMessages[i].sender;
-      icebreakerCounts[reviver] = (icebreakerCounts[reviver] || 0) + 1;
+      icebreakerCounts[currentMsgSender] = (icebreakerCounts[currentMsgSender] || 0) + 1;
     }
 
-    if (validMessages[i].sender === currentSender) {
+    // Monologuer
+    if (currentMsgSender === currentSender) {
       currentStreak++;
     } else {
       const prev = validMessages[i - 1].sender;
@@ -83,7 +90,16 @@ function calculateStats(messages: Message[]) {
         monologuerStreaks[prev] = currentStreak;
       }
       currentStreak = 1;
-      currentSender = validMessages[i].sender;
+      currentSender = currentMsgSender;
+    }
+
+    // Speed Demon: Only track if replying to someone else, and ignore massive multi-hour gaps
+    if (currentMsgSender !== prevMsgSender && gap < 3600000) {
+      if (!userGaps[currentMsgSender]) {
+        userGaps[currentMsgSender] = { totalMs: 0, count: 0 };
+      }
+      userGaps[currentMsgSender].totalMs += gap;
+      userGaps[currentMsgSender].count += 1;
     }
   }
   
@@ -108,17 +124,8 @@ function calculateStats(messages: Message[]) {
 
   let busiestDate = "";
   let busiestDateCount = 0;
-  let ghostTownDate = "";
-  let ghostTownCount = Infinity;
   for (const [dateKey, count] of Object.entries(dateCounts)) {
     if (count > busiestDateCount) { busiestDateCount = count; busiestDate = dateKey; }
-    if (count < ghostTownCount) { ghostTownCount = count; ghostTownDate = dateKey; }
-  }
-
-  let busiestHour = 0;
-  let maxHourCount = 0;
-  for (let i = 0; i < 24; i++) {
-    if (hourlyStats[i] > maxHourCount) { maxHourCount = hourlyStats[i]; busiestHour = i; }
   }
 
   const userStats = Object.entries(userCounts)
@@ -137,6 +144,20 @@ function calculateStats(messages: Message[]) {
     if (streak > monologuerStreak) { monologuerStreak = streak; monologuerName = sender; }
   }
 
+  // Find the Speed Demon winner (Lowest average reply gap)
+  let speedDemonName = "Nobody";
+  let speedDemonMinAvg = Infinity;
+  for (const [sender, data] of Object.entries(userGaps)) {
+    if (data.count >= 5) { // Minimum threshold of replies to qualify
+      const avg = data.totalMs / data.count;
+      if (avg < speedDemonMinAvg) {
+        speedDemonMinAvg = avg;
+        speedDemonName = sender;
+      }
+    }
+  }
+  const speedDemonFormatted = speedDemonMinAvg !== Infinity ? formatDuration(speedDemonMinAvg) : "—";
+
   const totalMessages = validMessages.length;
   const totalUsers = userStats.length;
 
@@ -147,11 +168,8 @@ function calculateStats(messages: Message[]) {
     firstMessage: validMessages[0].timestamp,
     lastMessage: validMessages[validMessages.length - 1].timestamp,
     busiestDay,
-    busiestHour,
     busiestDate,
     busiestDateCount,
-    ghostTownDate,
-    ghostTownCount: ghostTownCount === Infinity ? 0 : ghostTownCount,
     hourlyStats,
     userStats,
     longestSilence,
@@ -160,6 +178,8 @@ function calculateStats(messages: Message[]) {
     icebreakerCount,
     monologuerName,
     monologuerStreak,
+    speedDemonName,
+    speedDemonFormatted,
   };
 }
 
@@ -397,10 +417,10 @@ export default function Dashboard({ data }: DashboardProps) {
           isDark={isDark}
         />
         <StatCard
-          icon={Ghost}
-          label="Ghost Town"
-          value={s.ghostTownDate ? fmt(s.ghostTownDate) : "—"}
-          sub={s.ghostTownCount != null ? `Only ${s.ghostTownCount} message${s.ghostTownCount === 1 ? "" : "s"} sent` : undefined}
+          icon={Zap}
+          label="Speed Demon"
+          value={s.speedDemonName && s.speedDemonName !== "Nobody" ? s.speedDemonName : "—"}
+          sub={s.speedDemonFormatted !== "—" ? `Fastest avg response: ${s.speedDemonFormatted}` : "No match"}
           isDark={isDark}
         />
         <StatCard
@@ -412,7 +432,6 @@ export default function Dashboard({ data }: DashboardProps) {
         />
       </div>
 
-      {/* Bento grid restored: Leaderboard (1 col) + Chart (2 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
         <div className={`border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
           <div className="flex items-center justify-between mb-6">
