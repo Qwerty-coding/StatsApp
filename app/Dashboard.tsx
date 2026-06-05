@@ -4,6 +4,7 @@ import { useState, useRef, useMemo } from "react";
 import { MessageSquare, Activity, Sun, Moon, Download, Flame, ChevronDown, Zap } from "lucide-react";
 import ActivityChart from "./ActivityChart";
 import { toPng } from "html-to-image";
+import WordCloud from "../components/WordCloud";
 import {
   PieChart,
   Pie,
@@ -29,27 +30,6 @@ interface DashboardProps {
   };
 }
 
-// Place this at the very top of app/Dashboard.tsx (outside the component/functions)
-const STOP_WORDS = new Set([
-  // Pure English structural fillers
-  "the", "a", "an", "and", "but", "or", "as", "if", "of", "at", "by", "for", "with", "about", 
-  "to", "in", "on", "into", "than", "from", "this", "that", "these", "those", "then", "there", 
-  "here", "its", "it's", "is", "am", "are", "was", "were", "be", "been", "being", "have", "has", 
-  "had", "do", "does", "did", "will", "would", "shall", "should", "can", "could", "may", "might", 
-  "must", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", 
-  "your", "his", "their", "ours", "just", "like", "so", "up", "down", "out", "no", "not", "yes", 
-  "get", "go", "me", "one", "all", "any", "can", "cant", "don_t", "dont", "what", "how", "why",
-  "edited", "message", "deleted", "omitted", "joined", "left", "group", "changed", 
-  "audio", "video", "photo", "sticker", "document", "voice", "call", "missed",
-
-  // Common Hinglish/Indian conversational filler tokens
-  "bhai", "yaar", "haan", "ha", "na", "nah", "ni", "nahi", "to", "toh", "hi", "bhi", "re", "abe", 
-  "acha", "achha", "aur", "ki", "ka", "ke", "ko", "se", "per", "me", "mai", "bnd", "banda", "bandi", 
-  "kya", "kyu", "kyun", "kuch", "sab", "kr", "kar", "karo", "krna", "karna", "krdo", "kardo", "rha", 
-  "raha", "rhi", "rahi", "rhe", "rahe", "tha", "thi", "the", "gaya", "gayi", "gaye", "ho", "hua", 
-  "hue", "hai", "hain", "hno", "hna", "hnn", "hm", "hmm", "hmmm", "ok", "okay", "kk", "k", "yo", 
-  "bro", "dude", "guys", "sir", "lmao", "lol", "rofl", "fr", "omg", "bruh", "btw", "fyi"
-]);
 
 function calculateStats(messages: Message[]) {
   if (!messages || messages.length === 0) return {};
@@ -221,35 +201,7 @@ function calculateStats(messages: Message[]) {
   const totalMessages = validMessages.length;
   const totalUsers = userStats.length;
 
-  // Word Frequency Pipeline
-  const wordCounts: Record<string, number> = {};
-
-  for (const msg of validMessages) {
-    if (msg.isMedia || !msg.text) continue;
-
-    // 1. Convert to lowercase and strip out URLs, links, and system noise
-    let cleanText = msg.text.toLowerCase();
-    cleanText = cleanText.replace(/https?:\/\/\S+|www\.\S+/g, ""); // Strip links
-    
-    // 2. Keep only alphanumeric characters and clean spaces
-    cleanText = cleanText.replace(/[^a-z0-9\s]/g, " ");
-
-    // 3. Tokenize by splitting on whitespaces
-    const tokens = cleanText.split(/\s+/);
-
-    // 4. Tally word frequency against the blacklist and length check
-    for (const token of tokens) {
-      if (token.length > 2 && !STOP_WORDS.has(token)) {
-        wordCounts[token] = (wordCounts[token] || 0) + 1;
-      }
-    }
-  }
-
-  // Sort and isolate the top 30 most overused words
-  const topWords = Object.entries(wordCounts)
-    .map(([word, count]) => ({ text: word, value: count }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 30);
+  
   return {
     totalMessages,
     totalUsers,
@@ -273,7 +225,7 @@ function calculateStats(messages: Message[]) {
     maxInteractions,
     leftOnReadName,
     maxLeftOnRead,
-    topWords,
+    
   };
 }
 
@@ -735,46 +687,9 @@ export default function Dashboard({ data }: DashboardProps) {
       </div>
       
 
-      {/* ── SECTION: GROUP VOCABULARY BENTO ── */}
-      <div className={`border rounded-2xl p-6 mb-10 flex flex-col min-h-[280px] ${
-        isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
-      }`}>
-        <div className="mb-6">
-          <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Group Vocabulary</h2>
-          <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Most frequently spammed words (filtered out filler & slang)</p>
-        </div>
-
-        {s.topWords && s.topWords.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-4 p-4 max-w-4xl mx-auto my-auto">
-            {s.topWords.map((word: { text: string; value: number }, i: number) => {
-              // Calculate a dynamic font scale based on positioning/frequency
-              // Top words get a massive presence, drifting lower down the rank
-              let fontSize = "text-sm font-normal opacity-50";
-              if (i < 3) fontSize = "text-4xl md:text-5xl font-black tracking-tight";
-              else if (i < 8) fontSize = "text-2xl md:text-3xl font-extrabold opacity-90";
-              else if (i < 15) fontSize = "text-lg md:text-xl font-bold opacity-80";
-              else if (i < 22) fontSize = "text-base font-semibold opacity-70";
-
-              const colorClass = WORD_COLORS[i % WORD_COLORS.length];
-
-              return (
-                <span
-                  key={word.text}
-                  className={`transition-all duration-200 hover:scale-110 cursor-default select-none ${fontSize} ${
-                    isDark ? colorClass : "text-zinc-800"
-                  }`}
-                  title={`${word.value.toLocaleString("en-IN")} matches`}
-                >
-                  {word.text}
-                </span>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-sm text-zinc-500">
-            Not enough text data analyzed to generate a clean vocabulary matrix.
-          </div>
-        )}
+      {/* ── SECTION: WORD CLOUD ── */}
+      <div className="mb-10">
+        <WordCloud messages={filteredMessages} isDark={isDark} maxWords={50} />
       </div>
 
 
