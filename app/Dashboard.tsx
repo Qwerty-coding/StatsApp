@@ -1,9 +1,16 @@
 "use client";
 
 import { useState, useRef, useMemo } from "react";
-import { MessageSquare, Calendar, Activity, Sun, Moon, Download, Flame, ChevronDown, Zap } from "lucide-react";
+import { MessageSquare, Activity, Sun, Moon, Download, Flame, ChevronDown, Zap } from "lucide-react";
 import ActivityChart from "./ActivityChart";
 import { toPng } from "html-to-image";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
 
 interface Message {
   timestamp: number;
@@ -21,6 +28,28 @@ interface DashboardProps {
     warnings?: string[];
   };
 }
+
+// Place this at the very top of app/Dashboard.tsx (outside the component/functions)
+const STOP_WORDS = new Set([
+  // Pure English structural fillers
+  "the", "a", "an", "and", "but", "or", "as", "if", "of", "at", "by", "for", "with", "about", 
+  "to", "in", "on", "into", "than", "from", "this", "that", "these", "those", "then", "there", 
+  "here", "its", "it's", "is", "am", "are", "was", "were", "be", "been", "being", "have", "has", 
+  "had", "do", "does", "did", "will", "would", "shall", "should", "can", "could", "may", "might", 
+  "must", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", 
+  "your", "his", "their", "ours", "just", "like", "so", "up", "down", "out", "no", "not", "yes", 
+  "get", "go", "me", "one", "all", "any", "can", "cant", "don_t", "dont", "what", "how", "why",
+  "edited", "message", "deleted", "omitted", "joined", "left", "group", "changed", 
+  "audio", "video", "photo", "sticker", "document", "voice", "call", "missed",
+
+  // Common Hinglish/Indian conversational filler tokens
+  "bhai", "yaar", "haan", "ha", "na", "nah", "ni", "nahi", "to", "toh", "hi", "bhi", "re", "abe", 
+  "acha", "achha", "aur", "ki", "ka", "ke", "ko", "se", "per", "me", "mai", "bnd", "banda", "bandi", 
+  "kya", "kyu", "kyun", "kuch", "sab", "kr", "kar", "karo", "krna", "karna", "krdo", "kardo", "rha", 
+  "raha", "rhi", "rahi", "rhe", "rahe", "tha", "thi", "the", "gaya", "gayi", "gaye", "ho", "hua", 
+  "hue", "hai", "hain", "hno", "hna", "hnn", "hm", "hmm", "hmmm", "ok", "okay", "kk", "k", "yo", 
+  "bro", "dude", "guys", "sir", "lmao", "lol", "rofl", "fr", "omg", "bruh", "btw", "fyi"
+]);
 
 function calculateStats(messages: Message[]) {
   if (!messages || messages.length === 0) return {};
@@ -64,17 +93,23 @@ function calculateStats(messages: Message[]) {
   let currentStreak = 1;
   let currentSender = validMessages[0]?.sender ?? "";
 
-  // For Speed Demon calculation
+  // Speed Demon
   const userGaps: Record<string, { totalMs: number; count: number }> = {};
+
+  // Dynamic Duo
+  const interactionCounts: Record<string, number> = {};
+
+  // Left on Read
+  const leftOnReadCounts: Record<string, number> = {};
 
   for (let i = 1; i < validMessages.length; i++) {
     const gap = validMessages[i].timestamp - validMessages[i - 1].timestamp;
+    const currentMsgSender = validMessages[i].sender;
+    const prevMsgSender = validMessages[i - 1].sender;
+
     if (gap > maxGapMs) maxGapMs = gap;
     totalGapMs += gap;
     gapCount++;
-
-    const currentMsgSender = validMessages[i].sender;
-    const prevMsgSender = validMessages[i - 1].sender;
 
     // Icebreaker
     if (gap > SIX_HOURS) {
@@ -93,16 +128,27 @@ function calculateStats(messages: Message[]) {
       currentSender = currentMsgSender;
     }
 
-    // Speed Demon: Only track if replying to someone else, and ignore massive multi-hour gaps
-    if (currentMsgSender !== prevMsgSender && gap < 3600000) {
+    // Speed Demon: Only track cross-person replies under 1 hour
+    if (currentMsgSender !== prevMsgSender && gap < 3_600_000) {
       if (!userGaps[currentMsgSender]) {
         userGaps[currentMsgSender] = { totalMs: 0, count: 0 };
       }
       userGaps[currentMsgSender].totalMs += gap;
       userGaps[currentMsgSender].count += 1;
     }
+
+    // Dynamic Duo: cross-person reply under 5 minutes
+    if (currentMsgSender !== prevMsgSender && gap < 300_000) {
+      const pairKey = [currentMsgSender, prevMsgSender].sort().join(" ⇄ ");
+      interactionCounts[pairKey] = (interactionCounts[pairKey] || 0) + 1;
+    }
+
+    // Left on Read: message followed by more than 2 hours of silence
+    if (gap > 7_200_000) {
+      leftOnReadCounts[prevMsgSender] = (leftOnReadCounts[prevMsgSender] || 0) + 1;
+    }
   }
-  
+
   if (currentSender && (!monologuerStreaks[currentSender] || currentStreak > monologuerStreaks[currentSender])) {
     monologuerStreaks[currentSender] = currentStreak;
   }
@@ -144,11 +190,11 @@ function calculateStats(messages: Message[]) {
     if (streak > monologuerStreak) { monologuerStreak = streak; monologuerName = sender; }
   }
 
-  // Find the Speed Demon winner (Lowest average reply gap)
+  // Speed Demon: Lowest average reply gap (minimum 5 qualifying replies)
   let speedDemonName = "Nobody";
   let speedDemonMinAvg = Infinity;
   for (const [sender, data] of Object.entries(userGaps)) {
-    if (data.count >= 5) { // Minimum threshold of replies to qualify
+    if (data.count >= 5) {
       const avg = data.totalMs / data.count;
       if (avg < speedDemonMinAvg) {
         speedDemonMinAvg = avg;
@@ -158,9 +204,52 @@ function calculateStats(messages: Message[]) {
   }
   const speedDemonFormatted = speedDemonMinAvg !== Infinity ? formatDuration(speedDemonMinAvg) : "—";
 
+  // Dynamic Duo: pair with most fast back-and-forth exchanges
+  let dynamicDuoPair = "";
+  let maxInteractions = 0;
+  for (const [pair, count] of Object.entries(interactionCounts)) {
+    if (count > maxInteractions) { maxInteractions = count; dynamicDuoPair = pair; }
+  }
+
+  // Left on Read: person whose messages most often precede long silences
+  let leftOnReadName = "";
+  let maxLeftOnRead = 0;
+  for (const [sender, count] of Object.entries(leftOnReadCounts)) {
+    if (count > maxLeftOnRead) { maxLeftOnRead = count; leftOnReadName = sender; }
+  }
+
   const totalMessages = validMessages.length;
   const totalUsers = userStats.length;
 
+  // Word Frequency Pipeline
+  const wordCounts: Record<string, number> = {};
+
+  for (const msg of validMessages) {
+    if (msg.isMedia || !msg.text) continue;
+
+    // 1. Convert to lowercase and strip out URLs, links, and system noise
+    let cleanText = msg.text.toLowerCase();
+    cleanText = cleanText.replace(/https?:\/\/\S+|www\.\S+/g, ""); // Strip links
+    
+    // 2. Keep only alphanumeric characters and clean spaces
+    cleanText = cleanText.replace(/[^a-z0-9\s]/g, " ");
+
+    // 3. Tokenize by splitting on whitespaces
+    const tokens = cleanText.split(/\s+/);
+
+    // 4. Tally word frequency against the blacklist and length check
+    for (const token of tokens) {
+      if (token.length > 2 && !STOP_WORDS.has(token)) {
+        wordCounts[token] = (wordCounts[token] || 0) + 1;
+      }
+    }
+  }
+
+  // Sort and isolate the top 30 most overused words
+  const topWords = Object.entries(wordCounts)
+    .map(([word, count]) => ({ text: word, value: count }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 30);
   return {
     totalMessages,
     totalUsers,
@@ -180,9 +269,17 @@ function calculateStats(messages: Message[]) {
     monologuerStreak,
     speedDemonName,
     speedDemonFormatted,
+    dynamicDuoPair,
+    maxInteractions,
+    leftOnReadName,
+    maxLeftOnRead,
+    topWords,
   };
 }
 
+// Donut chart color palette — cycles through named slices, last slot is "Others"
+const DONUT_COLORS = ["#3b82f6", "#a855f7", "#10b981", "#f97316", "#f43f5e", "#4b5563"];
+const WORD_COLORS = ["text-blue-400", "text-purple-400", "text-emerald-400", "text-orange-400", "text-pink-400", "text-cyan-400", "text-indigo-400"];
 function StatCard({
   icon: Icon, label, value, sub, isDark,
 }: {
@@ -254,6 +351,7 @@ export default function Dashboard({ data }: DashboardProps) {
   const [isDark, setIsDark] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
+  const [leaderboardView, setLeaderboardView] = useState<"list" | "chart">("list");
   const exportRef = useRef<HTMLDivElement>(null);
 
   const allMessages: Message[] = data?.messages ?? [];
@@ -319,6 +417,26 @@ export default function Dashboard({ data }: DashboardProps) {
     return match ? `${match.label} Wrapped` : `${timeFilter} Wrapped`;
   }, [timeFilter, s.firstMessage, s.lastMessage, filterOptions.months]);
 
+  // Donut chart data: top 5 individuals + aggregated "Others"
+  const pieData = useMemo(() => {
+    if (!userStats.length || !s.totalMessages) return [];
+    const top5 = userStats.slice(0, 5).map((u) => ({
+      name: u.sender,
+      value: u.messageCount,
+      pct: ((u.messageCount / s.totalMessages) * 100).toFixed(1),
+    }));
+    const rest = userStats.slice(5);
+    if (rest.length > 0) {
+      const othersTotal = rest.reduce((sum, u) => sum + u.messageCount, 0);
+      top5.push({
+        name: "Others",
+        value: othersTotal,
+        pct: ((othersTotal / s.totalMessages) * 100).toFixed(1),
+      });
+    }
+    return top5;
+  }, [userStats, s.totalMessages]);
+
   const handleExport = async () => {
     if (!exportRef.current) return;
     setIsExporting(true);
@@ -340,6 +458,7 @@ export default function Dashboard({ data }: DashboardProps) {
       isDark ? "bg-[#09090b] text-white" : "bg-[#fcfcfd] text-zinc-900"
     }`}>
 
+      {/* Header */}
       <div className="flex justify-between items-start mb-10">
         <div>
           <h1 className={`text-3xl md:text-4xl font-semibold tracking-tight mb-2 ${isDark ? "text-white" : "text-zinc-900"}`}>
@@ -401,6 +520,7 @@ export default function Dashboard({ data }: DashboardProps) {
         </div>
       </div>
 
+      {/* Top Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
         <StatCard
           icon={MessageSquare}
@@ -432,44 +552,165 @@ export default function Dashboard({ data }: DashboardProps) {
         />
       </div>
 
+      {/* Leaderboard + Activity Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+
+        {/* Leaderboard card */}
         <div className={`border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
-          <div className="flex items-center justify-between mb-6">
+
+          {/* Card header: title + member badge + view toggle */}
+          <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
             <div>
               <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Leaderboard</h2>
               <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>By message volume</p>
             </div>
-            <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
-              {userStats.length} members
-            </span>
+            <div className="flex items-center gap-2">
+              {/* Member count badge */}
+              <span className={`text-xs font-medium px-3 py-1 rounded-full ${isDark ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}`}>
+                {userStats.length} members
+              </span>
+              {/* View toggle */}
+              <div className={`flex items-center rounded-full p-0.5 ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
+                <button
+                  onClick={() => setLeaderboardView("list")}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${
+                    leaderboardView === "list"
+                      ? isDark
+                        ? "bg-white/15 text-white"
+                        : "bg-white text-zinc-900 shadow-sm"
+                      : isDark
+                        ? "text-zinc-500 hover:text-zinc-300"
+                        : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  List
+                </button>
+                <button
+                  onClick={() => setLeaderboardView("chart")}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${
+                    leaderboardView === "chart"
+                      ? isDark
+                        ? "bg-white/15 text-white"
+                        : "bg-white text-zinc-900 shadow-sm"
+                      : isDark
+                        ? "text-zinc-500 hover:text-zinc-300"
+                        : "text-zinc-400 hover:text-zinc-600"
+                  }`}
+                >
+                  Chart
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="overflow-y-auto space-y-4 pr-2" style={{ maxHeight: 420 }}>
-            {userStats.slice(0, 50).map((u, i) => {
-              const pct = Math.round((u.messageCount / topCount) * 100);
-              return (
-                <div key={u.sender} className="group">
-                  <div className="flex items-center justify-between mb-2 gap-2">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
-                        {i + 1}
-                      </span>
-                      <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
-                        {u.sender}
+
+          {/* List view */}
+          {leaderboardView === "list" && (
+            <div className="overflow-y-auto space-y-4 pr-2" style={{ maxHeight: 420 }}>
+              {userStats.slice(0, 50).map((u, i) => {
+                const pct = Math.round((u.messageCount / topCount) * 100);
+                return (
+                  <div key={u.sender} className="group">
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+                          {i + 1}
+                        </span>
+                        <span className={`text-sm truncate font-medium ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>
+                          {u.sender}
+                        </span>
+                      </div>
+                      <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                        {u.messageCount.toLocaleString("en-IN")}
                       </span>
                     </div>
-                    <span className={`text-xs font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                      {u.messageCount.toLocaleString("en-IN")}
+                    <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
+                      <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Chart view */}
+          {leaderboardView === "chart" && (
+            <div className="flex flex-col flex-1 min-h-0">
+              {/* Donut chart */}
+              <div className="flex-1 min-h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="65%"
+                      outerRadius="85%"
+                      paddingAngle={2}
+                      strokeWidth={0}
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={DONUT_COLORS[index] ?? DONUT_COLORS[DONUT_COLORS.length - 1]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      cursor={false}
+                      content={({ active, payload }: any) => {
+                        if (active && payload && payload.length) {
+                          const item = payload[0].payload;
+                          return (
+                            <div className={`px-3 py-2 rounded-xl border text-xs backdrop-blur-md ${
+                              isDark
+                                ? "bg-[#121214]/90 border-white/10 text-white"
+                                : "bg-white/90 border-zinc-200 text-zinc-900 shadow-lg"
+                            }`}>
+                              <p className={`font-semibold mb-0.5 truncate max-w-[160px] ${isDark ? "text-zinc-100" : "text-zinc-800"}`}>
+                                {item.name}
+                              </p>
+                              <p className={isDark ? "text-zinc-400" : "text-zinc-500"}>
+                                {item.value.toLocaleString("en-IN")} messages
+                                <span className="ml-1 font-semibold" style={{ color: payload[0].fill }}>
+                                  ({item.pct}%)
+                                </span>
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Legend */}
+              <div className="mt-3 space-y-2 overflow-y-auto pr-1" style={{ maxHeight: 160 }}>
+                {pieData.map((entry, index) => (
+                  <div key={entry.name} className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="flex-shrink-0 w-2.5 h-2.5 rounded-full"
+                        style={{ background: DONUT_COLORS[index] ?? DONUT_COLORS[DONUT_COLORS.length - 1] }}
+                      />
+                      <span className={`text-xs truncate ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+                        {entry.name}
+                      </span>
+                    </div>
+                    <span className={`text-xs font-semibold flex-shrink-0 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                      {entry.pct}%
                     </span>
                   </div>
-                  <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
-                    <div className="h-full rounded-full bg-[#3b82f6]" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
+        {/* Activity Chart card */}
         <div className={`lg:col-span-2 border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -492,7 +733,52 @@ export default function Dashboard({ data }: DashboardProps) {
           </div>
         </div>
       </div>
+      
 
+      {/* ── SECTION: GROUP VOCABULARY BENTO ── */}
+      <div className={`border rounded-2xl p-6 mb-10 flex flex-col min-h-[280px] ${
+        isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"
+      }`}>
+        <div className="mb-6">
+          <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Group Vocabulary</h2>
+          <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Most frequently spammed words (filtered out filler & slang)</p>
+        </div>
+
+        {s.topWords && s.topWords.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-4 p-4 max-w-4xl mx-auto my-auto">
+            {s.topWords.map((word: { text: string; value: number }, i: number) => {
+              // Calculate a dynamic font scale based on positioning/frequency
+              // Top words get a massive presence, drifting lower down the rank
+              let fontSize = "text-sm font-normal opacity-50";
+              if (i < 3) fontSize = "text-4xl md:text-5xl font-black tracking-tight";
+              else if (i < 8) fontSize = "text-2xl md:text-3xl font-extrabold opacity-90";
+              else if (i < 15) fontSize = "text-lg md:text-xl font-bold opacity-80";
+              else if (i < 22) fontSize = "text-base font-semibold opacity-70";
+
+              const colorClass = WORD_COLORS[i % WORD_COLORS.length];
+
+              return (
+                <span
+                  key={word.text}
+                  className={`transition-all duration-200 hover:scale-110 cursor-default select-none ${fontSize} ${
+                    isDark ? colorClass : "text-zinc-800"
+                  }`}
+                  title={`${word.value.toLocaleString("en-IN")} matches`}
+                >
+                  {word.text}
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-zinc-500">
+            Not enough text data analyzed to generate a clean vocabulary matrix.
+          </div>
+        )}
+      </div>
+
+
+      {/* Hall of Fame — 3×2 grid */}
       <div className="mb-4 flex items-center gap-3">
         <h2 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
           Hall of Fame
@@ -503,7 +789,8 @@ export default function Dashboard({ data }: DashboardProps) {
         Lifetime achievements, unlocked by data.
       </p>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 gap-6 mb-10">
+        {/* Row 1 */}
         <AchievementCard
           title="Top Talker"
           name={userStats[0]?.sender ?? "—"}
@@ -522,6 +809,8 @@ export default function Dashboard({ data }: DashboardProps) {
           isDark={isDark}
           accentColor="#a855f7"
         />
+
+        {/* Row 2 */}
         <AchievementCard
           title="The Icebreaker"
           name={s.icebreakerName ?? "—"}
@@ -540,8 +829,29 @@ export default function Dashboard({ data }: DashboardProps) {
           isDark={isDark}
           accentColor="#10b981"
         />
+
+        {/* Row 3 */}
+        <AchievementCard
+          title="Dynamic Duo"
+          name={s.dynamicDuoPair || "—"}
+          stat={s.maxInteractions ?? 0}
+          statLabel="fast replies"
+          flavor="Finishing each other's sentences. These two completely dominate the chat's frequency when they get going."
+          isDark={isDark}
+          accentColor="#c084fc"
+        />
+        <AchievementCard
+          title="Left on Read"
+          name={s.leftOnReadName || "—"}
+          stat={s.maxLeftOnRead ?? 0}
+          statLabel="conversations killed"
+          flavor="Sent a message that was followed by a massive wall of silence. The absolute text terminator."
+          isDark={isDark}
+          accentColor="#f43f5e"
+        />
       </div>
 
+      {/* Hidden Export Poster */}
       <div className="fixed left-[-9999px] top-0 pointer-events-none">
         <div
           ref={exportRef}
@@ -577,6 +887,7 @@ export default function Dashboard({ data }: DashboardProps) {
           </div>
 
           <div className="grid grid-cols-2 gap-6 flex-1">
+            {/* Top Talker */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#3b82f6" }} />
               <div>
@@ -592,6 +903,7 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
+            {/* The Observer */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#a855f7" }} />
               <div>
@@ -607,6 +919,7 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
+            {/* The Icebreaker */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#f97316" }} />
               <div>
@@ -622,6 +935,7 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
 
+            {/* The Monologuer */}
             <div className="bg-[#121214] border border-white/10 rounded-[32px] p-8 flex flex-col justify-between relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full opacity-10 blur-2xl" style={{ background: "#10b981" }} />
               <div>
