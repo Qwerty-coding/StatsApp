@@ -112,7 +112,7 @@ export default function WordCloud({ messages, isDark, maxWords = 50 }: WordCloud
           <textarea
             value={customFilter}
             onChange={(e) => setCustomFilter(e.target.value)}
-            placeholder="Add words to filter (comma-separated): annoying_slang, word2"
+            placeholder="Add words to filter (space-separated): word1 word2"
             className={`w-full text-xs p-2 rounded border ${isDark ? "bg-[#121214] border-white/10 text-white" : "bg-white border-zinc-300"} focus:outline-none focus:ring-1 focus:ring-blue-500`}
             rows={2}
           />

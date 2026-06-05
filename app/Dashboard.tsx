@@ -30,7 +30,6 @@ interface DashboardProps {
   };
 }
 
-
 function calculateStats(messages: Message[]) {
   if (!messages || messages.length === 0) return {};
 
@@ -38,6 +37,7 @@ function calculateStats(messages: Message[]) {
   const dayCounts: Record<string, number> = {};
   const dateCounts: Record<string, number> = {};
   const hourlyStats = Array(24).fill(0);
+  const monthCounts: Record<string, number> = {};
   const validMessages: Message[] = [];
 
   for (const msg of messages) {
@@ -50,13 +50,15 @@ function calculateStats(messages: Message[]) {
     const date = new Date(msg.timestamp);
     if (!isNaN(date.getTime())) {
       const day = date.toLocaleDateString("en-US", { weekday: "long" });
+      const month = date.toLocaleDateString("en-US", { month: "short" });
       const hour = date.getHours();
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
       dayCounts[day] = (dayCounts[day] || 0) + 1;
+      monthCounts[month] = (monthCounts[month] || 0) + 1;
       dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
       hourlyStats[hour]++;
     }
-  }
+    }
 
   if (validMessages.length === 0) return {};
 
@@ -201,7 +203,17 @@ function calculateStats(messages: Message[]) {
   const totalMessages = validMessages.length;
   const totalUsers = userStats.length;
 
+  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const weeklyStats = daysOfWeek.map(day => ({
+    name: day.substring(0, 3), // Formats to "Mon", "Tue", etc.
+    value: dayCounts[day] || 0
+  }));
   
+  const monthsOfYear = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthlyStats = monthsOfYear.map(m => ({
+    name: m,
+    value: monthCounts[m] || 0
+  }));
   return {
     totalMessages,
     totalUsers,
@@ -225,13 +237,15 @@ function calculateStats(messages: Message[]) {
     maxInteractions,
     leftOnReadName,
     maxLeftOnRead,
-    
+    weeklyStats, // Returned the computed array for the Activity Chart
+    monthlyStats, // Returned the computed array for the Monthly Activity Chart
   };
 }
 
 // Donut chart color palette — cycles through named slices, last slot is "Others"
 const DONUT_COLORS = ["#3b82f6", "#a855f7", "#10b981", "#f97316", "#f43f5e", "#4b5563"];
 const WORD_COLORS = ["text-blue-400", "text-purple-400", "text-emerald-400", "text-orange-400", "text-pink-400", "text-cyan-400", "text-indigo-400"];
+
 function StatCard({
   icon: Icon, label, value, sub, isDark,
 }: {
@@ -666,13 +680,13 @@ export default function Dashboard({ data }: DashboardProps) {
         <div className={`lg:col-span-2 border rounded-2xl p-6 flex flex-col min-h-[400px] ${isDark ? "bg-[#121214] border-white/5" : "bg-white border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]"}`}>
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Activity by Hour</h2>
-              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency across the day</p>
+              <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Chat Rhythm</h2>
+              <p className={`text-xs mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Message frequency over time</p>
             </div>
             <div className="flex gap-4">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>
-                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak hour</span>
+                <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>Peak</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full ${isDark ? "bg-white/20" : "bg-black/20"}`}></span>
@@ -680,8 +694,13 @@ export default function Dashboard({ data }: DashboardProps) {
               </div>
             </div>
           </div>
-          <div className="w-full h-[320px] mt-2">
-            <ActivityChart hourlyData={s.hourlyStats ?? Array(24).fill(0)} isDark={isDark} />
+          <div className="w-full flex-1 min-h-[320px] mt-2">
+            <ActivityChart 
+              hourlyData={s.hourlyStats ?? Array(24).fill(0)} 
+              weeklyData={s.weeklyStats ?? []} 
+              monthlyData={s.monthlyStats ?? []}
+              isDark={isDark} 
+            />
           </div>
         </div>
       </div>
