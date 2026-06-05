@@ -9,31 +9,84 @@
 ![Open Source](https://img.shields.io/badge/Open-Source-orange?style=flat-square)
 ![Privacy First](https://img.shields.io/badge/Privacy-First-purple?style=flat-square)
 
-VibeCheck is a **privacy-first, fully client-side** WhatsApp chat analyzer. Upload your `.txt` chat export and get a Spotify Wrapped–style analytics dashboard — rich stats, interactive charts, and a shareable 1080×1920 poster — all without a single byte of your data leaving your device.
+VibeCheck is a **privacy-first, fully client-side** WhatsApp and Telegram chat analyzer. Upload your export and get a Spotify Wrapped–style analytics dashboard — rich stats, interactive charts, Hall of Fame achievements, a Word Cloud, and a shareable 1080×1920 poster — all without a single byte of your data leaving your device.
 
 ---
 
 ## Features
 
 ### Analytics Dashboard
-- **Top Talker** — Who dominated the group and by how much (message count + percentage share)
-- **Pure Chaos** — The busiest day of the week, backed by real frequency data
-- **Response Time** — Group-wide average gap between messages
+
+- **Total Messages** — Full message count with per-member average
+- **Busiest Date** — The single highest-volume day in the chat's history, with message count
+- **Speed Demon** — The member with the fastest average reply time (minimum 5 qualifying replies)
+- **Avg Response Time** — Group-wide average gap between consecutive messages
 - **Longest Silence** — The maximum time the chat went completely quiet
-- **Busiest Date** — The single highest-volume day in the chat's history
-- **Peak Hour** — The time of day your group is most active
-- **Leaderboard** — Full ranked list of all members by message volume, with visual progress bars
-- **Activity by Hour** — Interactive bar chart showing message distribution across all 24 hours
+
+### Leaderboard
+
+Full ranked list of all members by message volume, with two views:
+
+- **List view** — Progress bars showing each member's share relative to the top talker
+- **Chart view** — Interactive donut chart of the top 5 contributors + an aggregated "Others" slice, with hover tooltips
+
+### Chat Rhythm
+
+Interactive bar chart with a **3-way toggle**:
+
+- **24 Hours** — Message distribution across all hours of the day
+- **Days** — Activity broken down by day of the week
+- **Months** — Month-by-month message volume across the chat's lifetime
+
+Peak bars are highlighted in blue; all others are rendered as low-opacity fills.
+
+### Group Vocabulary (Word Cloud)
+
+Extracts your group's most authentic vocabulary with aggressive noise reduction:
+
+- Strips invisible Unicode characters and zero-width spaces
+- Built-in English and Hinglish stop-word list (`bhai`, `yaar`, `kya`, `hai`, `lol`, etc.)
+- Real-time custom exclusion filter — type any word to remove it from the cloud on the fly
+- Weighted by frequency; color-coded by rank
+
+### Hall of Fame
+
+Six lifetime achievement cards, each driven by real behavioral data:
+
+| Award | Criteria |
+|---|---|
+| **Top Talker** | Highest total message count |
+| **The Observer** | Lowest total message count |
+| **The Icebreaker** | Most messages sent after 6+ hours of silence |
+| **The Monologuer** | Longest unbroken streak of consecutive messages |
+| **Dynamic Duo** | Pair with the most rapid back-and-forth exchanges under 5 minutes |
+| **Left on Read** | Person whose messages most often preceded 2+ hours of silence |
+
+### Time Filter
+
+Filter the entire dashboard — all stats, charts, leaderboard, Word Cloud, and Hall of Fame — by:
+
+- All-time
+- A specific year
+- A specific calendar month
 
 ### Export
-- One-click **"Export Wrapped"** generates a high-resolution **1080×1920 PNG poster** — styled for Instagram Stories, WhatsApp Status, or Twitter — entirely client-side via `html-to-image`.
+
+One-click **"Export Wrapped"** generates a high-resolution **1080×1920 PNG poster** — styled for Instagram Stories, WhatsApp Status, or Twitter — entirely client-side via `html-to-image`. The poster includes total messages, busiest date, and all four main Hall of Fame awards.
 
 ### Privacy by Architecture
-- **Zero server involvement.** Parsing runs inside a Web Worker in your browser.
-- No accounts. No uploads. No tracking. No cloud storage. Ever.
 
-### Format Support
-VibeCheck auto-detects and parses all major WhatsApp export formats:
+- **Zero server involvement.** Parsing runs in a Web Worker (a sandboxed background thread with no network or DOM access) in your browser.
+- No accounts. No uploads. No tracking. No cloud storage. Ever.
+- Closing or refreshing the tab permanently clears all data from memory.
+
+---
+
+## Format Support
+
+VibeCheck auto-detects and parses all major WhatsApp export formats, plus Telegram JSON exports.
+
+### WhatsApp
 
 | Format | Example |
 |---|---|
@@ -44,6 +97,10 @@ VibeCheck auto-detects and parses all major WhatsApp export formats:
 | Android (12-hour short) | `12/31/24, 3:45 PM - Eve: lol` |
 | Month abbreviation | `31/Dec/24, 15:45 - Frank: ok` |
 
+### Telegram
+
+Export your chat as **JSON** from Telegram Desktop (Settings → Export Chat History → Format: JSON). VibeCheck parses all message types including rich-text segments.
+
 ---
 
 ## The Privacy Guarantee
@@ -52,13 +109,13 @@ VibeCheck auto-detects and parses all major WhatsApp export formats:
 
 Here is exactly what happens when you upload a file:
 
-1. Your browser reads the `.txt` file from local disk — **no network request is made**.
-2. The raw text is handed off to a **Web Worker** — a sandboxed background thread that has no access to the DOM, network, or any external API.
+1. Your browser reads the `.txt` or `.json` file from local disk — **no network request is made**.
+2. The raw text is passed to a **Web Worker** — a sandboxed background thread with no access to the DOM, network, or any external API.
 3. The Worker parses every line using RegEx, aggregates all statistics in memory, and posts the result back to the UI thread.
 4. Your dashboard renders entirely from that in-memory result object.
 5. When you close or refresh the tab, everything is gone.
 
-There is no backend. There is no database. There is no analytics pipeline collecting your group members' names or message counts. The app is a static Next.js build served over a CDN — it has no server-side runtime at all.
+There is no backend. There is no database. There is no analytics pipeline. The app is a static Next.js build served over a CDN — it has no server-side runtime at all.
 
 **You can verify this yourself:** Open your browser's Network tab before uploading. You will see zero outbound requests triggered by your file.
 
@@ -66,37 +123,43 @@ There is no backend. There is no database. There is no analytics pipeline collec
 
 ## How to Use
 
-### Step 1 — Export your WhatsApp chat
+### Step 1 — Export your chat
 
-**On iPhone:**
-1. Open the group chat in WhatsApp.
-2. Tap the group name at the top → **Export Chat**.
-3. Select **Without Media**.
-4. Share the `.txt` file to yourself (via Files, Notes, email, etc.).
+**WhatsApp on iPhone:**
+1. Open the group chat → tap the group name → **Export Chat**.
+2. Select **Without Media**.
+3. Share the `.txt` file to yourself.
 
-**On Android:**
-1. Open the group chat in WhatsApp.
-2. Tap the three-dot menu (⋮) → **More** → **Export chat**.
-3. Select **Without Media**.
-4. Save or share the `.txt` file.
+**WhatsApp on Android:**
+1. Open the group chat → tap ⋮ → **More** → **Export chat**.
+2. Select **Without Media**.
+3. Save or share the `.txt` file.
+
+**Telegram Desktop:**
+1. Open the chat → click ⋮ → **Export Chat History**.
+2. Uncheck all media types, set Format to **JSON**.
+3. Save the exported folder; you need the `result.json` file inside it.
 
 ### Step 2 — Drop it into VibeCheck
 
 1. Go to **[stats-app-ecru.vercel.app](https://stats-app-ecru.vercel.app)**.
-2. Drag and drop your `.txt` file onto the upload zone, or click **Browse** to select it.
+2. Drag and drop your `.txt` or `.json` file onto the upload zone, or click **Browse**.
 3. Your dashboard loads instantly — no sign-in, no waiting.
 
-### Step 3 — Export your Wrapped poster
+### Step 3 — Explore and export
 
-1. Click **Export Wrapped** in the top-right corner of the dashboard.
-2. A `vibecheck-export.png` (1080×1920) will download directly to your device.
-3. Share it on Instagram Stories, WhatsApp Status, or anywhere you like.
+- Use the **time filter** (top-right dropdown) to slice stats by year or month.
+- Toggle the **Leaderboard** between List and Chart views.
+- Switch the **Chat Rhythm** chart between Hours, Days, and Months.
+- Type into the **Word Cloud** filter to remove any word in real time.
+- Click **Export Wrapped** to download your 1080×1920 poster.
 
 ---
 
 ## Getting Started (For Developers)
 
 ### Prerequisites
+
 - Node.js 18+
 - npm, yarn, or pnpm
 
@@ -128,7 +191,14 @@ npm start
 ```
 StatsApp/
 ├── app/                  # Next.js App Router pages and layouts
-├── public/               # Static assets
+│   ├── page.tsx          # Upload landing page
+│   ├── Dashboard.tsx     # Main analytics dashboard
+│   └── ActivityChart.tsx # Chat Rhythm chart component
+├── components/
+│   └── WordCloud.tsx     # Word Cloud component
+├── lib/                  # Core parsing logic and text extraction utilities
+├── public/
+│   └── parser.worker.js  # Web Worker: WhatsApp + Telegram parser
 ├── types.ts              # Shared TypeScript types
 ├── next.config.ts        # Next.js configuration
 └── tailwind.config.*     # Tailwind CSS configuration
@@ -150,14 +220,18 @@ StatsApp/
 
 ## Roadmap
 
-- [x] Multi-format WhatsApp export parsing
-- [x] Activity dashboard (8 stats)
-- [x] Leaderboard with progress bars
-- [x] Activity by Hour chart
-- [x] 1080×1920 PNG export
+- [x] Multi-format WhatsApp export parsing (6 formats)
+- [x] Telegram JSON export parsing
+- [x] Core stats dashboard (Total Messages, Busiest Date, Speed Demon, Avg Response Time, Longest Silence)
+- [x] Leaderboard — List view with progress bars
+- [x] Leaderboard — Donut chart view
+- [x] Chat Rhythm — Hourly, Daily, and Monthly activity charts
+- [x] Hall of Fame (Top Talker, Observer, Icebreaker, Monologuer, Dynamic Duo, Left on Read)
+- [x] Group Vocabulary Word Cloud (English + Hinglish stop-words + custom exclusion filter)
+- [x] 1080×1920 PNG export poster
 - [x] Dark / Light mode
-- [ ] Word Cloud (English + Hinglish stop-words)
-- [ ] Telegram export support
+- [x] Time filter (All-time, by year, by month)
+- [ ] Modular export switcher (selectable poster layouts)
 - [ ] Network graph (who replies to whom)
 - [ ] Hinglish sentiment analysis
 
@@ -177,7 +251,7 @@ Contributions are welcome. Please open an issue before submitting a pull request
 
 ## Disclaimer
 
-VibeCheck is an independent, open-source tool built by a third-party developer. It is **not affiliated with, authorized by, maintained by, sponsored by, or endorsed by WhatsApp LLC or Meta Platforms, Inc.** in any way.
+VibeCheck is an independent, open-source tool built by a third-party developer. It is **not affiliated with, authorized by, maintained by, sponsored by, or endorsed by WhatsApp LLC, Meta Platforms, Inc., or Telegram FZ-LLC** in any way.
 
 "WhatsApp" is a registered trademark of WhatsApp LLC. VibeCheck only processes `.txt` files that users have voluntarily exported from WhatsApp using WhatsApp's own built-in export functionality. No WhatsApp API is accessed, and no WhatsApp servers are contacted at any point.
 
