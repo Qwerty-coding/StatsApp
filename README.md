@@ -9,7 +9,7 @@
 ![Open Source](https://img.shields.io/badge/Open-Source-orange?style=flat-square)
 ![Privacy First](https://img.shields.io/badge/Privacy-First-purple?style=flat-square)
 
-VibeCheck is a **privacy-first, fully client-side** WhatsApp and Telegram chat analyzer. Upload your export and get a Spotify Wrapped–style analytics dashboard — rich stats, interactive charts, Hall of Fame achievements, a Word Cloud, and a shareable 1080×1920 poster — all without a single byte of your data leaving your device.
+VibeCheck is a **privacy-first, fully client-side** WhatsApp and Telegram chat analyzer. Upload your export and get a Spotify Wrapped–style analytics dashboard — rich stats, interactive charts, Hall of Fame achievements, a Word Cloud, a Time Machine scrubber, a force-directed Connection Web, a WebGL Emoji Galaxy, a Vibe Score, and a shareable 1080×1920 poster — all without a single byte of your data leaving your device.
 
 ---
 
@@ -61,6 +61,33 @@ Six lifetime achievement cards, each driven by real behavioral data:
 | **The Monologuer** | Longest unbroken streak of consecutive messages |
 | **Dynamic Duo** | Pair with the most rapid back-and-forth exchanges under 5 minutes |
 | **Left on Read** | Person whose messages most often preceded 2+ hours of silence |
+
+### Time Machine ⏳
+
+A density heatmap of the chat's entire history, baked onto a canvas strip. **Drag to select any window of time** — every stat, chart, leaderboard position, and achievement recomputes live for that era. Key moments are auto-detected and marked: 🎉 peak activity day, 💀 the longest silence, 👑 crown changes when the top talker shifts, 🌱 the first message, 🏁 the last.
+
+**Replay Mode** grows the window day-by-day at 1×, 10×, 60×, or 600 days-per-second while the dashboard animates through history.
+
+### Deep Dives
+
+Two heavyweight, on-demand visualizations (lazy-loaded, only when opened):
+- **Connection Web** — d3-force physics graph: people are nodes, replies are edges. Louvain community detection colors the clusters and auto-names them from member traits ("The Night Owls", "The Meme Lords", "The Quick Draw"). Hover an edge for exact stats ("Priya → Rohan: 347 replies, avg 42s"), drag nodes, zoom, and export as PNG.
+- **Emoji Galaxy** — a WebGL universe (three.js) where every emoji is a planet: size = usage, proximity = used together. Orbit/zoom freely, click a planet for its story — who uses it, when it first appeared, its monthly trend.
+
+### Vibe Score
+
+A 0–100 personality score for the chat with a 5-axis radar:
+- **Activity** — messages per member per day- **Balance** — how evenly members share the conversation (Shannon entropy)- **Loyalty** — share of the chat's lifespan with daily activity- **Chaos** — how spread out the hours of activity are- **Depth** — average words per message
+
+Each score ships with a verdict line ("Elite group chat energy. Protect this at all costs.")
+
+### Member Dossiers
+
+Click any member — in the leaderboard or on the Connection Web — to open their dossier: top words and emojis, an hour × weekday activity heatmap, best duo, who they reply to fastest, ghost count, longest monologue, and lifetime stats.
+
+### Recent Analyses
+
+Past parsed chats are kept locally (max 4) so you can re-open an analysis without re-dropping the file. Stored only in your browser; never synced anywhere.
 
 ### Time Filter
 
@@ -231,12 +258,15 @@ StatsApp/
 |---|---|
 | Framework | Next.js 16 (App Router, Turbopack) |
 | UI | React 19 + Tailwind CSS 4 |
-| Charts | Recharts |
+| Charts | Recharts + hand-rolled canvas/SVG/WebGL viz |
+| Graph & Physics | d3-force, graphology (+ Louvain communities) |
+| 3D | three.js (WebGL) |
 | Icons | Lucide React |
 | Export | html-to-image |
 | Parsing | Web Workers + RegEx |
 | Testing | Vitest |
 | CI | GitHub Actions (typecheck, lint, tests, build) |
+| d3-force / graphology / three | Force layout, community detection, WebGL galaxy |
 | Deployment | Vercel |
 
 ---
@@ -257,9 +287,15 @@ StatsApp/
 - [x] Streaming file reads with progress for large exports
 - [x] Off-main-thread parsing and word-cloud extraction (Web Workers)
 - [x] Unit tests (Vitest) + GitHub Actions CI
+- [x] Time Machine scrubber with density heatmap, replay mode, and auto-detected key moments
+- [x] Connection Web — d3-force network graph with Louvain communities and reply stats
+- [x] Emoji Galaxy — three.js WebGL emoji universe with co-usage clustering
+- [x] Vibe Score — 5-axis radar personality score
+- [x] Member Dossiers — per-member deep-dive drawer
+- [x] Recent analyses — re-open past analyses from the landing page
 - [ ] Modular export switcher (selectable poster layouts)
-- [ ] Network graph (who replies to whom)
 - [ ] Hinglish sentiment analysis
+- [ ] Poster: Connection Web and Vibe Score panels
 
 ---
 

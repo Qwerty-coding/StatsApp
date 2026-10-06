@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentType, ReactNode } from "react";
+import { AnimatedNumber } from "./AnimatedNumber";
 
 export function cardClasses(isDark: boolean): string {
   return isDark
@@ -31,7 +32,7 @@ export function StatCard({
       </div>
       <div>
         <div className={`text-4xl font-semibold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
-          {value}
+          {typeof value === "number" ? <AnimatedNumber value={value} /> : value}
         </div>
         {sub && <div className={`text-sm mt-1 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>{sub}</div>}
       </div>

@@ -17,11 +17,13 @@ interface LeaderboardProps {
   totalMessages: number;
   isDark: boolean;
   view: "list" | "chart";
+  /** Open the member dossier for a sender. */
+  onSelectMember?: (sender: string) => void;
 }
 
-export default function Leaderboard({ userStats, totalMessages, isDark, view }: LeaderboardProps) {
+export default function Leaderboard({ userStats, totalMessages, isDark, view, onSelectMember }: LeaderboardProps) {
   if (view === "list") {
-    return <LeaderboardList userStats={userStats} isDark={isDark} />;
+    return <LeaderboardList userStats={userStats} isDark={isDark} onSelectMember={onSelectMember} />;
   }
   return <LeaderboardChart userStats={userStats} totalMessages={totalMessages} isDark={isDark} />;
 }
@@ -29,9 +31,11 @@ export default function Leaderboard({ userStats, totalMessages, isDark, view }: 
 function LeaderboardList({
   userStats,
   isDark,
+  onSelectMember,
 }: {
   userStats: { sender: string; messageCount: number }[];
   isDark: boolean;
+  onSelectMember?: (sender: string) => void;
 }) {
   const topCount = userStats[0]?.messageCount ?? 1;
 
@@ -40,7 +44,13 @@ function LeaderboardList({
       {userStats.slice(0, 50).map((u, i) => {
         const pct = Math.round((u.messageCount / topCount) * 100);
         return (
-          <div key={u.sender} className="group">
+          <div
+            key={u.sender}
+            className={`group rounded-lg -mx-1 px-1 ${onSelectMember ? "cursor-pointer" : ""}`}
+            onClick={() => onSelectMember?.(u.sender)}
+            role={onSelectMember ? "button" : undefined}
+            title={onSelectMember ? `Open ${u.sender}'s dossier` : undefined}
+          >
             <div className="flex items-center justify-between mb-2 gap-2">
               <div className="flex items-center gap-3 min-w-0">
                 <span className={`text-sm font-medium w-5 text-center ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>

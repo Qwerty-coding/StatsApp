@@ -27,9 +27,9 @@ export class WhatsAppParser {
 
   detectFormat() {
     const patterns: Record<string, { regex: RegExp; parser: () => ParsedMessage[] }> = {
-      ios_12h_slash: { regex: /^\[\d{1,2}\/\d{1,2}\/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+(AM|PM)\]/, parser: this.parseIOS12hSlash.bind(this) },
-      android_24h_dot: { regex: /^\d{1,2}\.\d{1,2}\.\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+-\s+/, parser: this.parseAndroid24hDot.bind(this) },
-      android_24h_slash: { regex: /^\d{1,2}\/\d{1,2}\/\d{4},\s+\d{1,2}:\d{2}:\d{2}\s+-\s+/, parser: this.parseAndroid24hSlash.bind(this) },
+      ios_12h_slash: { regex: /^\[\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}:\d{2}\s+(AM|PM)\]/, parser: this.parseIOS12hSlash.bind(this) },
+      android_24h_dot: { regex: /^\d{1,2}\.\d{1,2}\.\d{2,4},\s+\d{1,2}:\d{2}:\d{2}\s+-\s+/, parser: this.parseAndroid24hDot.bind(this) },
+      android_24h_slash: { regex: /^\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}:\d{2}\s+-\s+/, parser: this.parseAndroid24hSlash.bind(this) },
       india_ddmmyy_short: { regex: /^\d{1,2}\/\d{1,2}\/\d{2},\s+\d{1,2}:\d{2}\s+-\s+/, parser: this.parseIndiaShortDate.bind(this) },
       android_12h_short: { regex: /^\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}[\s\u202F]*[aApP][mM]\s+-\s+/, parser: this.parseAndroid12hShort.bind(this) },
       india_ddmmmyy: { regex: /^\d{1,2}\/\w{3}\/\d{2},\s+\d{1,2}:\d{2}\s+-\s+/, parser: this.parseIndiaMonthAbbrev.bind(this) },
@@ -92,8 +92,8 @@ export class WhatsAppParser {
   parseIOS12hSlash(): ParsedMessage[] {
     const messages: ParsedMessage[] = [];
     let currentMessage: ParsedMessage | null = null;
-    const timestampRegex = /^\[(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)\]\s+(.+?):\s+(.*)/;
-    const systemMessageRegex = /^\[(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)\]\s+(.+?)$/;
+    const timestampRegex = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)\]\s+(.+?):\s+(.*)/;
+    const systemMessageRegex = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)\]\s+(.+?)$/;
 
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
@@ -132,8 +132,8 @@ export class WhatsAppParser {
   parseAndroid24hDot(): ParsedMessage[] {
     const messages: ParsedMessage[] = [];
     let currentMessage: ParsedMessage | null = null;
-    const timestampRegex = /^(\d{1,2})\.(\d{1,2})\.(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?):\s+(.*)/;
-    const systemMessageRegex = /^(\d{1,2})\.(\d{1,2})\.(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?)$/;
+    const timestampRegex = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?):\s+(.*)/;
+    const systemMessageRegex = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?)$/;
 
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
@@ -244,8 +244,8 @@ export class WhatsAppParser {
   parseAndroid24hSlash(): ParsedMessage[] {
     const messages: ParsedMessage[] = [];
     let currentMessage: ParsedMessage | null = null;
-    const timestampRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?):\s+(.*)/;
-    const systemMessageRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?)$/;
+    const timestampRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?):\s+(.*)/;
+    const systemMessageRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+-\s+(.+?)$/;
 
     for (let i = 0; i < this.lines.length; i++) {
       const line = this.lines[i];
@@ -371,11 +371,15 @@ export class WhatsAppParser {
     let hour24 = parseInt(hour);
     if (ampm === "PM" && hour24 !== 12) hour24 += 12;
     else if (ampm === "AM" && hour24 === 12) hour24 = 0;
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), hour24, parseInt(min), parseInt(sec)).getTime();
+    let y = parseInt(year);
+    if (y < 100) y = this.expandYearShort(y);
+    return new Date(y, parseInt(month) - 1, parseInt(day), hour24, parseInt(min), parseInt(sec)).getTime();
   }
 
   parseTimestamp24h(day: string, month: string, year: string, hour: string, min: string, sec: string): number {
-    return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(min), parseInt(sec)).getTime();
+    let y = parseInt(year);
+    if (y < 100) y = this.expandYearShort(y);
+    return new Date(y, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(min), parseInt(sec)).getTime();
   }
 
   /**

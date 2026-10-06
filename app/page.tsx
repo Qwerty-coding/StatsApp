@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
+import { Clock, Trash2 } from "lucide-react";
 import type { ParseResult } from "../types";
+import {
+  subscribeRecents, getRecentsSnapshot, getRecentsServerSnapshot, saveRecent, deleteRecent,
+} from "../lib/recents";
 
 // Code-split: the heavy dashboard (recharts, html-to-image, word cloud) is
 // excluded from the landing page bundle entirely.
@@ -10,6 +14,18 @@ const Dashboard = dynamic(() => import("./Dashboard"), { ssr: false });
 
 const MAX_FILE_BYTES = 200 * 1024 * 1024; // 200 MB hard ceiling
 const CHUNK_BYTES = 2 * 1024 * 1024; // 2 MB decode chunks
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
 
 const ACCEPTED_EXTENSIONS = [".txt", ".json"];
 
@@ -27,6 +43,12 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [parsedData, setParsedData] = useState<ParseResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  // Recent analyses: subscribed as an external store — no effect-setState.
+  const recents = useSyncExternalStore(
+    subscribeRecents,
+    getRecentsSnapshot,
+    getRecentsServerSnapshot
+  );
 
   const workerRef = useRef<Worker | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
@@ -98,6 +120,7 @@ export default function Home() {
           worker.onmessage = (event: MessageEvent<ParseResult>) => {
             const data = event.data;
             if (data.success) {
+              saveRecent(file.name, fileType, data);
               setParsedData(data);
               setStatus("done");
             } else {
@@ -125,6 +148,7 @@ export default function Home() {
           }
           const result = data as ParseResult;
           if (result.success) {
+            saveRecent(file.name, fileType, result);
             setParsedData(result);
             setStatus("done");
           } else {
@@ -285,6 +309,53 @@ export default function Home() {
         <p className="text-zinc-700 text-xs text-center mt-6">
           WhatsApp: ··· → More → Export chat → Without Media &nbsp;·&nbsp; Telegram: ··· → Export Chat History → Format: JSON
         </p>
+
+        {/* Recent analyses */}
+        {recents.length > 0 && status !== "loading" && (
+          <div className="mt-10">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-400">
+                <Clock size={14} />
+                Recent analyses
+              </h2>
+            </div>
+            <div className="space-y-2">
+              {recents.map((r) => (
+                <div
+                  key={r.id}
+                  className={`group flex items-center gap-3 p-3 rounded-xl border border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-600 transition-all cursor-pointer`}
+                  onClick={() => {
+                    setParsedData(r.data);
+                    setFilename(r.name);
+                  }}
+                >
+                  <div className="w-9 h-9 rounded-lg bg-zinc-800 flex items-center justify-center text-sm">
+                    {r.fileType === "telegram" ? "✈️" : "💬"}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-200 truncate">{r.name}</p>
+                    <p className="text-xs text-zinc-500">
+                      {r.data.messages.length.toLocaleString("en-IN")} messages · {relativeTime(r.savedAt)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteRecent(r.id);
+                    }}
+                    className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-950/30 opacity-0 group-hover:opacity-100 transition-all"
+                    aria-label={`Forget ${r.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="text-zinc-700 text-[11px] text-center mt-3">
+              Stored only in this browser — clearing site data removes them.
+            </p>
+          </div>
+        )}
       </div>
     </main>
   );

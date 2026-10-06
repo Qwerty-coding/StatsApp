@@ -6,6 +6,12 @@ import type { ParsedMessage, Stats, StatsResult } from "../types";
 
 export type TimeFilter = string; // "all" | "YYYY" | "YYYY-MM"
 
+/** Continuous time window from the Time Machine scrubber; overrides the preset filter. */
+export interface WindowRange {
+  startMs: number;
+  endMs: number;
+}
+
 export interface ChatFilterOptions {
   years: string[];
   months: { label: string; sortKey: string }[];
@@ -17,12 +23,17 @@ interface UseChatStatsResult {
   filterOptions: ChatFilterOptions;
   timeFilter: TimeFilter;
   setTimeFilter: (f: TimeFilter) => void;
+  windowRange: WindowRange | null;
+  setWindowRange: (r: WindowRange | null) => void;
+  /** Bounds of the whole chat, for the Time Machine scrubber. */
+  dataRange: { firstMs: number; lastMs: number };
   /** null when there are no valid messages in the current selection. */
   stats: Stats | null;
 }
 
 const THEME_KEY = "vibecheck.theme";
 const FILTER_KEY = "vibecheck.timeFilter";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function readStoredTheme(): boolean {
   try {
@@ -86,6 +97,7 @@ export function useChatStats(data: {
 
   const setTimeFilterPersisted = (f: TimeFilter) => {
     setTimeFilter(f);
+    setWindowRange(null); // a preset choice clears the custom scrub window
     try {
       localStorage.setItem(FILTER_KEY, f);
     } catch {
@@ -93,7 +105,17 @@ export function useChatStats(data: {
     }
   };
 
+  const [windowRange, setWindowRange] = useState<WindowRange | null>(null);
+
   const filteredMessages = useMemo(() => {
+    if (windowRange) {
+      return allMessages.filter(
+        (msg) =>
+          !msg.isSystem &&
+          msg.timestamp >= windowRange.startMs &&
+          msg.timestamp <= windowRange.endMs + DAY_MS - 1 // endMs is a local midnight; include its whole day
+      );
+    }
     if (timeFilter === "all") return allMessages;
     return allMessages.filter((msg) => {
       if (msg.isSystem) return false;
@@ -103,7 +125,12 @@ export function useChatStats(data: {
       const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       return monthKey === timeFilter;
     });
-  }, [allMessages, timeFilter]);
+  }, [allMessages, timeFilter, windowRange]);
+
+  const dataRange = useMemo(() => {
+    if (allMessages.length === 0) return { firstMs: 0, lastMs: 0 };
+    return { firstMs: allMessages[0].timestamp, lastMs: allMessages[allMessages.length - 1].timestamp };
+  }, [allMessages]);
 
   const rawStats = useMemo(() => calculateStats(filteredMessages), [filteredMessages]) as StatsResult;
   const stats: Stats | null = useMemo(
@@ -111,7 +138,11 @@ export function useChatStats(data: {
     [rawStats]
   );
 
-  return { allMessages, filteredMessages, filterOptions, timeFilter, setTimeFilter: setTimeFilterPersisted, stats };
+  return {
+    allMessages, filteredMessages, filterOptions, timeFilter,
+    setTimeFilter: setTimeFilterPersisted,
+    windowRange, setWindowRange, dataRange, stats,
+  };
 }
 
 /** Persisted dark/light preference. Defaults to dark (the app's design). */
