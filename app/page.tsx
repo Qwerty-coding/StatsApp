@@ -1,54 +1,189 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
-import Dashboard from "./Dashboard";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import type { ParseResult } from "../types";
+
+// Code-split: the heavy dashboard (recharts, html-to-image, word cloud) is
+// excluded from the landing page bundle entirely.
+const Dashboard = dynamic(() => import("./Dashboard"), { ssr: false });
+
+const MAX_FILE_BYTES = 200 * 1024 * 1024; // 200 MB hard ceiling
+const CHUNK_BYTES = 2 * 1024 * 1024; // 2 MB decode chunks
+
+const ACCEPTED_EXTENSIONS = [".txt", ".json"];
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+type UploadStatus = "idle" | "loading" | "done" | "error";
 
 export default function Home() {
-  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [filename, setFilename] = useState<string>("");
+  const [status, setStatus] = useState<UploadStatus>("idle");
+  const [filename, setFilename] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [parsedData, setParsedData] = useState<ParseResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
   const workerRef = useRef<Worker | null>(null);
-  const [parsedData, setParsedData] = useState<any>(null);
-  
-  const processFile = useCallback((file: File) => {
-    if (!file.name.endsWith(".txt") && !file.name.endsWith(".json")) {
-      setStatus("error");
-      return;
-    }
-    const fileType = file.name.endsWith(".json") ? "telegram" : "whatsapp";
-    setFilename(file.name);
-    setStatus("loading");
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const cancelledRef = useRef(false);
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const worker = new Worker("/parser.worker.js");
-      workerRef.current = worker;
-
-      worker.onmessage = (event) => {
-        console.log("Worker result:", event.data);
-        setStatus("done");
-        if (event.data.success) {
-          setParsedData(event.data);
-          setStatus("done");
-        }
-        worker.terminate();
-      };
-
-      worker.onerror = (err) => {
-        console.error("Worker error:", err);
-        setStatus("error");
-        worker.terminate();
-      };
-
-      worker.postMessage({ text, fileType });
-    };
-    reader.readAsText(file, "utf-8");
+  const killWorker = useCallback(() => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
   }, []);
+
+  const cancelInFlight = useCallback(() => {
+    cancelledRef.current = true;
+    readerRef.current?.cancel().catch(() => {});
+    readerRef.current = null;
+    killWorker();
+  }, [killWorker]);
+
+  // Terminate the worker + cancel any in-flight stream on unmount.
+  useEffect(() => cancelInFlight, [cancelInFlight]);
+
+  const failWith = useCallback((message: string) => {
+    setErrorMessage(message);
+    setStatus("error");
+    killWorker();
+  }, [killWorker]);
+
+  const processFile = useCallback(
+    async (file: File) => {
+      // Any previous run is torn down before we start a new one.
+      cancelInFlight();
+      const cancelled = () => cancelledRef.current;
+
+      const lowerName = file.name.toLowerCase();
+      if (!ACCEPTED_EXTENSIONS.some((ext) => lowerName.endsWith(ext))) {
+        failWith("Unsupported file type — drop a WhatsApp .txt or Telegram .json export.");
+        return;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        failWith(`File is ${formatBytes(file.size)} — the limit is ${formatBytes(MAX_FILE_BYTES)}.`);
+        return;
+      }
+      if (file.size === 0) {
+        failWith("That file is empty.");
+        return;
+      }
+
+      const fileType = lowerName.endsWith(".json") ? "telegram" : "whatsapp";
+
+      setFilename(file.name);
+      setErrorMessage("");
+      setProgress(0);
+      setParsedData(null);
+      setStatus("loading");
+      cancelledRef.current = false;
+
+      // Telegram exports are JSON — the whole document is needed before
+      // JSON.parse can run, so stream only plain-text WhatsApp exports.
+      const canStream = fileType === "whatsapp" && typeof file.stream === "function";
+
+      try {
+        if (!canStream) {
+          // Telegram (or missing stream support): read whole file, single shot.
+          const text = await file.text();
+          if (cancelled()) return;
+
+          const worker = new Worker(new URL("../lib/parser.worker.ts", import.meta.url), { type: "module" });
+          workerRef.current = worker;
+
+          worker.onmessage = (event: MessageEvent<ParseResult>) => {
+            const data = event.data;
+            if (data.success) {
+              setParsedData(data);
+              setStatus("done");
+            } else {
+              failWith(data.errors?.[0] ?? "Could not find any messages in this export.");
+            }
+            killWorker();
+          };
+          worker.onerror = (err) => {
+            console.error("Worker error:", err);
+            failWith("The parser crashed while reading this file.");
+          };
+
+          worker.postMessage({ text, fileType });
+          return;
+        }
+
+        // Streaming path: feed 2 MB text chunks to the worker as they decode.
+        const worker = new Worker(new URL("../lib/parser.worker.ts", import.meta.url), { type: "module" });
+        workerRef.current = worker;
+        worker.onmessage = (event: MessageEvent<ParseResult | { type: "progress"; progress: number }>) => {
+          const data = event.data;
+          if ("type" in data && data.type === "progress") {
+            setProgress(data.progress);
+            return;
+          }
+          const result = data as ParseResult;
+          if (result.success) {
+            setParsedData(result);
+            setStatus("done");
+          } else {
+            failWith(result.errors?.[0] ?? "Could not find any messages in this export.");
+          }
+          killWorker();
+        };
+        worker.onerror = (err) => {
+          console.error("Worker error:", err);
+          failWith("The parser crashed while reading this file.");
+        };
+
+        const stream: ReadableStream<Uint8Array> = file.stream();
+        const reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+        readerRef.current = reader;
+
+        const decoder = new TextDecoder("utf-8");
+        let pending = "";
+        let offset = 0;
+
+        // Decode loop that never splits a multi-byte character between chunks:
+        // keep any trailing incomplete sequence in `pending` until more bytes
+        // arrive (stream: true) or flush it on the final chunk.
+        const flushToWorker = (text: string, isFinal: boolean) => {
+          worker.postMessage({ mode: "chunk", text, offset, total: file.size, isFinal, fileType });
+        };
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (cancelled()) return;
+          if (done) break;
+
+          offset += value.byteLength;
+          pending += decoder.decode(value, { stream: true });
+
+          if (pending.length >= CHUNK_BYTES) {
+            flushToWorker(pending, false);
+            pending = "";
+          }
+        }
+        pending += decoder.decode(); // flush any remaining partial sequence
+
+        if (cancelled()) return;
+        flushToWorker(pending, true);
+      } catch (error) {
+        if (!cancelled()) {
+          console.error("Failed to read file:", error);
+          failWith("Could not read that file — it may be locked or in use.");
+        }
+      }
+    },
+    [cancelInFlight, failWith, killWorker]
+  );
 
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       const file = e.dataTransfer.files?.[0];
-      if (file) processFile(file);
+      if (file) void processFile(file);
     },
     [processFile]
   );
@@ -56,22 +191,23 @@ export default function Home() {
   const onFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) processFile(file);
+      if (file) void processFile(file);
+      e.target.value = ""; // allow re-selecting the same file
     },
     [processFile]
   );
 
-  const statusText: Record<typeof status, string> = {
+  const statusText: Record<UploadStatus, string> = {
     idle: "Drop your WhatsApp (.txt) or Telegram (.json) export here",
-    loading: "Parsing…",
-    done: `✓ Done — check console for output (${filename})`,
-    error: "Something went wrong — make sure it's a .txt or .json file",
+    loading: progress > 0 ? `Reading… ${progress}%` : "Reading…",
+    done: `✓ Done — ${filename}`,
+    error: errorMessage || "Something went wrong — make sure it's a .txt or .json file",
   };
-  
+
   if (parsedData) {
     return <Dashboard data={parsedData} />;
   }
-  
+
   return (
     <main className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
@@ -120,8 +256,19 @@ export default function Home() {
             >
               {statusText[status]}
             </p>
+            {status === "loading" && (
+              <div className="w-full max-w-xs mx-auto h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all duration-200"
+                  style={{ width: `${Math.max(progress, 4)}%` }}
+                />
+              </div>
+            )}
             {status === "idle" && (
               <p className="text-zinc-600 text-xs">or click to browse</p>
+            )}
+            {status === "error" && errorMessage && (
+              <p className="text-zinc-600 text-xs">{filename ? `While reading ${filename}` : " "}</p>
             )}
           </div>
         </div>

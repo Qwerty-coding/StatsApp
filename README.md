@@ -2,8 +2,8 @@
 
 **Your group chat, turned into a story.**
 
-![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)
-![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-CSS-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Open Source](https://img.shields.io/badge/Open-Source-orange?style=flat-square)
@@ -79,6 +79,7 @@ One-click **"Export Wrapped"** generates a high-resolution **1080×1920 PNG post
 - **Zero server involvement.** Parsing runs in a Web Worker (a sandboxed background thread with no network or DOM access) in your browser.
 - No accounts. No uploads. No tracking. No cloud storage. Ever.
 - Closing or refreshing the tab permanently clears all data from memory.
+- Large WhatsApp exports are **streamed** to the worker in 2 MB chunks — the whole file is never held in memory at once (capped at 200 MB as a safety guard).
 
 ---
 
@@ -186,34 +187,56 @@ npm run build
 npm start
 ```
 
+### Tests & Checks
+
+```bash
+npm test        # Vitest unit tests (parser + stats)
+npm run lint    # ESLint
+npm run typecheck  # tsc --noEmit
+```
+
+The parsing core (`lib/whatsapp-parser.ts`) and stats engine (`lib/calculateStats.ts`) are pure, dependency-free modules covered by 30+ unit tests across all six WhatsApp export formats, Telegram JSON, and every Hall of Fame calculation. GitHub Actions runs the full suite (typecheck, lint, tests, build) on every push and pull request.
+
 ### Project Structure
 
 ```
 StatsApp/
-├── app/                  # Next.js App Router pages and layouts
-│   ├── page.tsx          # Upload landing page
-│   ├── Dashboard.tsx     # Main analytics dashboard
-│   └── ActivityChart.tsx # Chat Rhythm chart component
+├── app/                       # Next.js App Router pages and layouts
+│   ├── page.tsx               # Upload landing page (streaming read + guards)
+│   ├── Dashboard.tsx          # Main analytics dashboard (composition root)
+│   └── ActivityChart.tsx      # Chat Rhythm chart component
 ├── components/
-│   └── WordCloud.tsx     # Word Cloud component
-├── lib/                  # Core parsing logic and text extraction utilities
-├── public/
-│   └── parser.worker.js  # Web Worker: WhatsApp + Telegram parser
-├── types.ts              # Shared TypeScript types
-├── next.config.ts        # Next.js configuration
-└── tailwind.config.*     # Tailwind CSS configuration
+│   ├── WordCloud.tsx          # Word Cloud component
+│   └── dashboard/             # Dashboard building blocks
+│       ├── Cards.tsx          # StatCard + AchievementCard
+│       ├── HallOfFame.tsx     # Achievements grid
+│       ├── Leaderboard.tsx    # List + donut chart views
+│       ├── Poster.tsx         # 1080×1920 export poster
+│       └── WarningsBanner.tsx # Parser data-quality warnings
+├── lib/
+│   ├── parser.worker.ts       # Web Worker: parse plumbing (chunked + full)
+│   ├── whatsapp-parser.ts     # Pure WhatsApp/Telegram parsing core (unit-tested)
+│   ├── calculateStats.ts      # Shared stats aggregation (used by worker + UI)
+│   ├── useChatStats.ts        # Dashboard state hook (filter, theme, stats)
+│   ├── word-extraction.worker.ts # Web Worker: word cloud extraction
+│   └── optimized-word-extraction.ts
+├── tests/                     # Vitest unit tests
+├── types.ts                   # Shared TypeScript types
+└── vitest.config.ts
 ```
 
 ### Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 14 (App Router) |
-| UI | React 18 + Tailwind CSS |
+| Framework | Next.js 16 (App Router, Turbopack) |
+| UI | React 19 + Tailwind CSS 4 |
 | Charts | Recharts |
 | Icons | Lucide React |
 | Export | html-to-image |
 | Parsing | Web Workers + RegEx |
+| Testing | Vitest |
+| CI | GitHub Actions (typecheck, lint, tests, build) |
 | Deployment | Vercel |
 
 ---
@@ -229,8 +252,11 @@ StatsApp/
 - [x] Hall of Fame (Top Talker, Observer, Icebreaker, Monologuer, Dynamic Duo, Left on Read)
 - [x] Group Vocabulary Word Cloud (English + Hinglish stop-words + custom exclusion filter)
 - [x] 1080×1920 PNG export poster
-- [x] Dark / Light mode
-- [x] Time filter (All-time, by year, by month)
+- [x] Dark / Light mode (persisted)
+- [x] Time filter (All-time, by year, by month, persisted)
+- [x] Streaming file reads with progress for large exports
+- [x] Off-main-thread parsing and word-cloud extraction (Web Workers)
+- [x] Unit tests (Vitest) + GitHub Actions CI
 - [ ] Modular export switcher (selectable poster layouts)
 - [ ] Network graph (who replies to whom)
 - [ ] Hinglish sentiment analysis

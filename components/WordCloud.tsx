@@ -1,16 +1,11 @@
-import React, { useMemo, useState } from "react";
-import { extractAndFilterWords } from "../lib/optimized-word-extraction"; // Updated path
+"use client";
 
-interface Message {
-  timestamp: number;
-  sender: string;
-  text: string;
-  isMedia: boolean;
-  isSystem: boolean;
-}
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { extractAndFilterWords } from "../lib/optimized-word-extraction";
+import type { ParsedMessage } from "../types";
 
 interface WordCloudProps {
-  messages: Message[];
+  messages: ParsedMessage[];
   isDark: boolean;
   maxWords?: number;
 }
@@ -27,39 +22,89 @@ function getColor(index: number): string {
 
 function getRandomSize(index: number, total: number): number {
   const ratio = (total - index) / total;
-  return 0.6 + ratio * 1.8; 
+  return 0.6 + ratio * 1.8;
+}
+
+const BASE_FILTER_CONFIG = {
+  minFrequency: 3,
+  minUniqueUsers: 2,
+  minLength: 4, // Raised to 4 to kill short Hinglish noise
+  includeNumbers: false,
+  excludeNames: true,
+} as const;
+
+interface WordItem {
+  word: string;
+  frequency: number;
 }
 
 export default function WordCloud({ messages, isDark, maxWords = 50 }: WordCloudProps) {
   const [customFilter, setCustomFilter] = useState("");
-  const [filterConfig, setFilterConfig] = useState({
-    minFrequency: 3,
-    minUniqueUsers: 2,
-    minLength: 4, // Raised to 4 to kill short Hinglish noise
-    includeNumbers: false,
-    excludeNames: true,
-  });
+  const [baseWordData, setBaseWordData] = useState<WordItem[]>([]);
+  const requestIdRef = useRef(0);
 
-  // 1. Heavy extraction: Runs ONLY when the core messages or slider settings change
-  const baseWordData = useMemo(() => {
-    return extractAndFilterWords(messages, filterConfig);
-  }, [messages, filterConfig]);
+  // Heavy extraction runs in a worker when available (keeps the UI thread
+  // free on large chats); falls back to sync computation otherwise (SSR,
+  // workers unavailable, or worker construction failure).
+  useEffect(() => {
+    let cancelled = false;
+    const id = ++requestIdRef.current;
 
-  // 2. Light filtering: Runs instantly when typing custom words without recalculating the whole chat
+    const runSync = () => {
+      const result = extractAndFilterWords(messages, BASE_FILTER_CONFIG);
+      if (!cancelled) setBaseWordData(result.words);
+    };
+
+    if (typeof Worker === "undefined") {
+      runSync();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("../lib/word-extraction.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      runSync();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    worker.onmessage = (event: MessageEvent<{ id: number; words: WordItem[]; error: string | null }>) => {
+      if (event.data.id !== requestIdRef.current) return; // stale response
+      if (!cancelled) setBaseWordData(event.data.words);
+      worker.terminate();
+    };
+    worker.onerror = () => {
+      // Worker failed to load — recompute on the main thread.
+      if (!cancelled) runSync();
+      worker.terminate();
+    };
+
+    worker.postMessage({ id, messages, config: BASE_FILTER_CONFIG });
+
+    return () => {
+      cancelled = true;
+      worker.terminate();
+    };
+  }, [messages]);
+
+  // Light filtering: instant when typing custom words; no re-extraction.
   const wordData = useMemo(() => {
     const customStops = new Set(
       customFilter
         .split(/[\s,]+/)
         // Aggressively strip anything that isn't a letter or number from the input
-        .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
-        .filter(w => w.length > 0)
+        .map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, ""))
+        .filter((w) => w.length > 0)
     );
 
-    return baseWordData.words
-      .filter((item: { word: string; frequency: number }) => {
+    return baseWordData
+      .filter((item) => {
         // Aggressively strip invisible characters and @ tags from the chat data
-        const heavilyCleanedWord = item.word.toLowerCase().replace(/[^a-z0-9]/g, '');
-        
+        const heavilyCleanedWord = item.word.toLowerCase().replace(/[^a-z0-9]/g, "");
         return !customStops.has(heavilyCleanedWord);
       })
       .slice(0, maxWords);

@@ -1,3 +1,5 @@
+import type { ParsedMessage } from "../types";
+
 export const englishStopWords = new Set([
   "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
   "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
@@ -40,7 +42,17 @@ export const commonIndianNames = new Set([
   "reddy", "khan", "malik", "shah", "desai", "iyer", "nair", "menon", "das", "sen", "roy"
 ]);
 
-export function extractAndFilterWords(messages: any[], config: any = {}) {
+export interface WordFilterConfig {
+  minFrequency?: number;
+  minUniqueUsers?: number;
+  minLength?: number;
+  maxLength?: number;
+  includeNumbers?: boolean;
+  excludeNames?: boolean;
+  customStopWords?: Set<string>;
+}
+
+export function extractAndFilterWords(messages: ParsedMessage[], config: WordFilterConfig = {}): { words: { word: string; frequency: number }[] } {
   const {
     minFrequency = 3,
     minUniqueUsers = 2,
@@ -70,7 +82,7 @@ export function extractAndFilterWords(messages: any[], config: any = {}) {
     const words = msg.text.split(/[\s\n\t(),;:"'!?.—–\-<>\[\]{}*]+/).filter((w: string) => w.length > 0);
     const uniqueWords = new Set<string>();
 
-    for (let rawWord of words) {
+    for (const rawWord of words) {
       const word = rawWord.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       
       if (!word) continue;

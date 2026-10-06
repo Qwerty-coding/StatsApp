@@ -93,18 +93,18 @@ export default function ActivityChart({ hourlyData, weeklyData, monthlyData, isD
               dataKey="label"
               axisLine={false}
               tickLine={false}
-              tick={({ x, y, payload }: any) => {
-                if (viewMode === "hourly" && !SHOW_TICKS.has(payload.index)) return <g />;
+              tick={({ x, y, payload }: { x?: string | number; y?: string | number; payload?: { index?: number; value?: string } }) => {
+                if (viewMode === "hourly" && !SHOW_TICKS.has(payload?.index ?? -1)) return <g />;
                 return (
-                  <text x={x} y={y + 16} textAnchor="middle" fill={isDark ? "#a1a1aa" : "#71717a"} className="text-xs font-medium">
-                    {payload.value}
+                  <text x={x as number} y={Number(y ?? 0) + 16} textAnchor="middle" fill={isDark ? "#a1a1aa" : "#71717a"} className="text-xs font-medium">
+                    {payload?.value}
                   </text>
                 );
               }}
             />
             <Tooltip
               cursor={{ fill: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)" }}
-              content={({ active, payload }: any) => {
+              content={({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ value?: unknown; payload?: { label?: string } }> }) => {
                 if (active && payload && payload.length) {
                   return (
                     <div className={`p-3 rounded-xl border backdrop-blur-md ${
@@ -113,10 +113,10 @@ export default function ActivityChart({ hourlyData, weeklyData, monthlyData, isD
                         : "bg-white/90 border-zinc-200 text-zinc-900 shadow-lg"
                     }`}>
                       <p className={`text-xs font-medium mb-1 ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
-                        {payload[0].payload.label}
+                        {payload[0].payload?.label}
                       </p>
                       <p className="text-lg font-semibold">
-                        {payload[0].value.toLocaleString("en-IN")} messages
+                        {Number(payload[0].value ?? 0).toLocaleString("en-IN")} messages
                       </p>
                     </div>
                   );
