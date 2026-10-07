@@ -5,11 +5,12 @@ import {
   forceSimulation, forceLink, forceManyBody, forceCollide, forceCenter,
   type SimulationNodeDatum, type SimulationLinkDatum,
 } from "d3-force";
-import { ImageDown } from "lucide-react";
+import { ImageDown, Share2, Waypoints } from "lucide-react";
 import { cardClasses } from "./Cards";
 import type { PairStat, MemberProfile } from "../../lib/analytics/pairStats";
 import { detectCommunities, type Community } from "../../lib/analytics/communities";
 import { avatarColor, initials } from "../../lib/analytics/text-utils";
+import { buildConnectionWebHtml, type GraphExportPayload } from "../../lib/export/graphHtml";
 
 /**
  * Connection Web: people as nodes, replies as edges. Force-directed physics
@@ -23,6 +24,11 @@ interface NetworkGraphProps {
   isDark: boolean;
   minStrength: number; // 0..1 — filter weak edges
   onNodeClick?: (sender: string) => void;
+  /** Label of the analyzed window, shown in the exported header. */
+  rangeLabel?: string;
+  /** Bounds of the analyzed chat, for the exported range note. */
+  firstMs?: number;
+  lastMs?: number;
 }
 
 interface NetNode extends SimulationNodeDatum {
@@ -39,7 +45,16 @@ interface NetLink extends SimulationLinkDatum<NetNode> {
 
 const EDGE_ALPHA_BASE = 0.18;
 
-export default function NetworkGraph({ members, pairs, isDark, minStrength, onNodeClick }: NetworkGraphProps) {
+export default function NetworkGraph({
+  members,
+  pairs,
+  isDark,
+  minStrength,
+  onNodeClick,
+  rangeLabel = "All-Time",
+  firstMs = 0,
+  lastMs = 0,
+}: NetworkGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const simRef = useRef<ReturnType<typeof forceSimulation<NetNode>> | null>(null);
@@ -60,10 +75,16 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
 
   const maxExchanges = useMemo(() => pairs.reduce((m, p) => Math.max(m, p.exchanges), 1), [pairs]);
 
+  // Links visible under the current strength filter — derived for both the
+  // simulation effect and render-time a11y labels (refs can't be read during render).
+  const visibleLinks = useMemo(
+    () => pairs.filter((p) => p.exchanges >= minStrength * maxExchanges * 0.15),
+    [pairs, minStrength, maxExchanges]
+  );
+
   // Build graph + simulation when data or filter changes
   useEffect(() => {
     if (members.length === 0) return;
-    const threshold = minStrength * maxExchanges * 0.15;
 
     const nodes: NetNode[] = members.map((m) => ({
       id: m.sender,
@@ -71,9 +92,7 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
       community: communityById.get(assignment[m.sender] ?? -1),
       color: communityById.get(assignment[m.sender] ?? -1)?.color ?? avatarColor(m.sender),
     }));
-    const links: NetLink[] = pairs
-      .filter((p) => p.exchanges >= threshold)
-      .map((p) => ({ source: p.a, target: p.b, pair: p }));
+    const links: NetLink[] = visibleLinks.map((p) => ({ source: p.a, target: p.b, pair: p }));
 
     nodesRef.current = nodes;
     linksRef.current = links;
@@ -101,7 +120,7 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
       sim.stop();
       simRef.current = null;
     };
-  }, [members, pairs, minStrength, maxExchanges, communityById, assignment]);
+  }, [members, pairs, visibleLinks, maxExchanges, communityById, assignment]);
 
   // Render loop
   useEffect(() => {
@@ -346,12 +365,28 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
     if (node && onNodeClick) onNodeClick(node.id);
   };
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const { k } = transformRef.current;
-    const next = Math.max(0.35, Math.min(4, k * (e.deltaY > 0 ? 0.9 : 1.1)));
-    transformRef.current.k = next;
-  };
+  // Native non-passive wheel listener: React's synthetic onWheel is passive
+  // at the root, so preventDefault() there can't stop the page from scrolling.
+  // Zoom is anchored at the cursor: the world point under the pointer stays
+  // fixed while k changes → translate' = mouse − center − k′ · world.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { k, x, y } = transformRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left - rect.width / 2;
+      const my = e.clientY - rect.top - rect.height / 2;
+      const wx = (mx - x) / k;
+      const wy = (my - y) / k;
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      const k2 = Math.max(0.35, Math.min(4, k * factor));
+      transformRef.current = { k: k2, x: mx - k2 * wx, y: my - k2 * wy };
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
 
   const exportPng = async () => {
     const canvas = canvasRef.current;
@@ -367,7 +402,91 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
     }
   };
 
-  if (members.length === 0) return null;
+  // Flagship export: a single HTML file a friend can open offline and explore
+  // — drag, zoom, hover for exact stats. Embeds the settled layout.
+  const exportHtml = () => {
+    if (!members.length) return;
+    const nodes: GraphExportPayload["nodes"] = nodesRef.current.map((n) => ({
+      id: n.id,
+      label: n.id,
+      initials: initials(n.id),
+      community: n.community ? communities.findIndex((c) => c.id === n.community?.id) : -1,
+      color: n.color,
+      x: Math.round(n.x ?? 0),
+      y: Math.round(n.y ?? 0),
+      r: Math.round(14 + Math.sqrt(n.messageCount) * 1.5),
+      messages: n.messageCount,
+    }));
+    const nodeIndex = new Map(nodesRef.current.map((n, i) => [n.id, i]));
+    const links: GraphExportPayload["links"] = visibleLinks.map((p) => {
+      const a = nodeIndex.get(p.a) ?? 0;
+      const b = nodeIndex.get(p.b) ?? 0;
+      return {
+        s: a,
+        t: b,
+        exchanges: p.exchanges,
+        fast: p.fastExchanges,
+        avgMs: p.avgReplyMs,
+        medianMs: p.medianReplyMs,
+        aToB: p.bToA.replies, // bToA stat: b replied after a
+        bToA: p.aToB.replies, // aToB stat: a replied after b
+      };
+    });
+    const payload: GraphExportPayload = {
+      meta: {
+        title: "VibeCheck — Connection Web",
+        generatedAt: Date.now(),
+        rangeLabel,
+        messages: members.reduce((s, m) => s + m.messageCount, 0),
+        members: members.length,
+        days: firstMs && lastMs ? Math.max(1, Math.round((lastMs - firstMs) / 86_400_000)) : 0,
+      },
+      communities: communities.map((c, i) => ({
+        id: i,
+        name: c.name,
+        color: c.color,
+        memberCount: c.members.length,
+      })),
+      nodes,
+      links,
+    };
+    try {
+      const blob = new Blob([buildConnectionWebHtml(payload)], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "vibecheck-connections.html";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5_000);
+    } catch (err) {
+      console.error("HTML export failed", err);
+    }
+  };
+
+  if (members.length === 0) {
+    // (empty state rendered below; module-level guards keep hooks safe)
+    return (
+      <div className={`rounded-2xl border p-6 ${cardClasses(isDark)}`}>
+        <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Connection Web</h2>
+        <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+          Who actually talks to whom — drag nodes, hover edges, scroll to zoom
+        </p>
+        <div
+          className="relative w-full rounded-xl flex flex-col items-center justify-center text-center mt-3"
+          style={{ height: 480, background: isDark ? "#0d0d10" : "#fafafa" }}
+        >
+          <Waypoints size={28} className={`mb-3 ${isDark ? "text-zinc-600" : "text-zinc-400"}`} aria-hidden />
+          <p className={`text-sm font-semibold ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+            Not enough connections yet
+          </p>
+          <p className={`text-xs mt-1 max-w-sm ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+            The web draws itself from replies between people. This selection has no
+            back-and-forth yet — widen the time window or pick a livelier era in the Time Machine.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`rounded-2xl border p-6 ${cardClasses(isDark)}`}>
@@ -378,15 +497,28 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
             Who actually talks to whom — drag nodes, hover edges, scroll to zoom
           </p>
         </div>
-        <button
-          onClick={exportPng}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-            isDark ? "bg-white/5 text-zinc-300 hover:bg-white/10" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-          }`}
-        >
-          <ImageDown size={13} />
-          PNG
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportPng}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              isDark ? "bg-white/5 text-zinc-300 hover:bg-white/10" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            }`}
+          >
+            <ImageDown size={13} />
+            PNG
+          </button>
+          <button
+            onClick={exportHtml}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              isDark
+                ? "bg-[#3b82f6]/15 text-blue-400 hover:bg-[#3b82f6]/25"
+                : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+            }`}
+          >
+            <Share2 size={13} />
+            Share HTML
+          </button>
+        </div>
       </div>
 
       {/* Legend */}
@@ -413,9 +545,19 @@ export default function NetworkGraph({ members, pairs, isDark, minStrength, onNo
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={() => { hoverRef.current = { node: null, link: null }; setHoverInfo(null); onPointerUp(); }}
-          onWheel={onWheel}
           onClick={onClick}
+          role="img"
+          aria-label={`Connection Web: ${members.length} members, ${communities.length} communities, ${visibleLinks.length} connections`}
         />
+        {/* Screen-reader fallback for the canvas */}
+        <ul className="sr-only">
+          {communities.map((c) => (
+            <li key={c.id}>{c.name}: {c.members.join(", ")}</li>
+          ))}
+          {members.map((m) => (
+            <li key={m.sender}>{m.sender}: {m.messageCount.toLocaleString("en-IN")} messages</li>
+          ))}
+        </ul>
 
         {/* Hover tooltip */}
         {hoverInfo && (

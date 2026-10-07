@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { calculateStats } from "./calculateStats";
+import { presetRangeFromFilter } from "./presetRange";
 import type { ParsedMessage, Stats, StatsResult } from "../types";
 
 export type TimeFilter = string; // "all" | "YYYY" | "YYYY-MM"
@@ -23,6 +24,8 @@ interface UseChatStatsResult {
   filterOptions: ChatFilterOptions;
   timeFilter: TimeFilter;
   setTimeFilter: (f: TimeFilter) => void;
+  /** Concrete bounds behind the preset filter; null for all-time. */
+  presetRange: { startMs: number; endMs: number } | null;
   windowRange: WindowRange | null;
   setWindowRange: (r: WindowRange | null) => void;
   /** Bounds of the whole chat, for the Time Machine scrubber. */
@@ -107,6 +110,8 @@ export function useChatStats(data: {
 
   const [windowRange, setWindowRange] = useState<WindowRange | null>(null);
 
+  const presetRange = useMemo(() => presetRangeFromFilter(timeFilter), [timeFilter]);
+
   const filteredMessages = useMemo(() => {
     if (windowRange) {
       return allMessages.filter(
@@ -139,7 +144,7 @@ export function useChatStats(data: {
   );
 
   return {
-    allMessages, filteredMessages, filterOptions, timeFilter,
+    allMessages, filteredMessages, filterOptions, timeFilter, presetRange,
     setTimeFilter: setTimeFilterPersisted,
     windowRange, setWindowRange, dataRange, stats,
   };

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import type { ParsedMessage, Stats } from "../../types";
 import { computeVibeScore, type VibeAxis } from "../../lib/analytics/vibeScore";
+import { radarLayout, axisPoint } from "../../lib/analytics/radar";
 import { cardClasses } from "./Cards";
 
 /**
@@ -25,7 +26,7 @@ export default function VibeScore({ stats, messages, isDark }: { stats: Stats; m
         className="absolute -top-10 -right-10 w-48 h-48 rounded-full opacity-[0.07] blur-3xl pointer-events-none"
         style={{ background: scoreColor }}
       />
-      <div className="grid md:grid-cols-[auto_1fr] gap-8 items-center">
+      <div className="grid md:grid-cols-[minmax(0,auto)_1fr] gap-8 items-center">
         {/* Radar */}
         <Radar axes={vibe.axes} isDark={isDark} accent={scoreColor} />
 
@@ -57,7 +58,7 @@ export default function VibeScore({ stats, messages, isDark }: { stats: Stats; m
             {vibe.verdict}
           </p>
 
-          <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-x-4 gap-y-2">
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-2">
             {vibe.axes.map((a) => (
               <div key={a.key}>
                 <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
@@ -76,16 +77,13 @@ export default function VibeScore({ stats, messages, isDark }: { stats: Stats; m
   );
 }
 
-/** Pentagonal radar rendered as inline SVG. */
+/** Pentagonal radar rendered as inline SVG. Geometry lives in lib/analytics/radar.ts —
+ *  padding is computed from the labels, so no axis label can ever clip. */
 function Radar({ axes, isDark, accent }: { axes: VibeAxis[]; isDark: boolean; accent: string }) {
-  const size = 210;
-  const c = size / 2;
-  const r = 78;
+  const layout = useMemo(() => radarLayout(axes.map((a) => a.label)), [axes]);
+  const { size, center } = layout;
 
-  const point = (idx: number, frac: number): [number, number] => {
-    const angle = (Math.PI * 2 * idx) / axes.length - Math.PI / 2;
-    return [c + Math.cos(angle) * r * frac, c + Math.sin(angle) * r * frac];
-  };
+  const point = (idx: number, frac: number): [number, number] => axisPoint(layout, idx, axes.length, frac);
 
   const ring = (frac: number) =>
     axes.map((_, i) => point(i, frac).join(",")).join(" ");
@@ -93,8 +91,9 @@ function Radar({ axes, isDark, accent }: { axes: VibeAxis[]; isDark: boolean; ac
   const dataPoly = axes.map((a, i) => point(i, Math.max(0.04, a.score / 100)).join(",")).join(" ");
 
   return (
-    <div className="mx-auto" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
+    <div className="aspect-square w-full max-w-[300px] shrink-0">
+      <svg viewBox={`0 0 ${size} ${size}`} width="100%" height="100%" role="img"
+        aria-label={`Vibe radar: ${axes.map((a) => `${a.label} ${a.score}`).join(", ")}`}>
         {/* Rings */}
         {[0.25, 0.5, 0.75, 1].map((f) => (
           <polygon
@@ -108,7 +107,7 @@ function Radar({ axes, isDark, accent }: { axes: VibeAxis[]; isDark: boolean; ac
         {/* Spokes */}
         {axes.map((a, i) => {
           const [x, y] = point(i, 1);
-          return <line key={a.key} x1={c} y1={c} x2={x} y2={y} stroke={isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"} />;
+          return <line key={a.key} x1={center} y1={center} x2={x} y2={y} stroke={isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"} />;
         })}
         {/* Data */}
         <polygon points={dataPoly} fill={accent} fillOpacity={0.25} stroke={accent} strokeWidth={2} strokeLinejoin="round" />
@@ -117,9 +116,9 @@ function Radar({ axes, isDark, accent }: { axes: VibeAxis[]; isDark: boolean; ac
           const [x, y] = point(i, Math.max(0.04, a.score / 100));
           return <circle key={a.key} cx={x} cy={y} r={3.5} fill={accent} />;
         })}
-        {/* Labels */}
+        {/* Labels — anchored at labelR from center; layout guarantees they fit */}
         {axes.map((a, i) => {
-          const [x, y] = point(i, 1.22);
+          const [x, y] = point(i, layout.labelR / layout.r);
           return (
             <text
               key={a.key}

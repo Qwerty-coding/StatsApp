@@ -12,6 +12,9 @@ import { cardClasses } from "./Cards";
  * Selecting a window re-filters the entire dashboard live; Replay Mode grows
  * the selection day-by-day. The `windowRange` in the parent is the single
  * source of truth — selection indices are derived from it, never mirrored.
+ *
+ * `activeRange` is the scope the preset filter allows (null = all-time).
+ * Days outside it are dimmed and not selectable; drags and replay clamp to it.
  */
 
 interface TimeMachineProps {
@@ -19,6 +22,10 @@ interface TimeMachineProps {
   dataRange: { firstMs: number; lastMs: number };
   windowRange: WindowRange | null;
   setWindowRange: (r: WindowRange | null) => void;
+  /** Bounds allowed by the preset filter (null = all-time). */
+  activeRange: WindowRange | null;
+  /** Human label of the preset ("2024", "March 2024", "All-Time"). */
+  activeLabel: string;
   isDark: boolean;
 }
 
@@ -27,7 +34,15 @@ type Speed = 1 | 10 | 60 | 600; // days per second
 const STRIP_H = 56;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export default function TimeMachine({ messages, dataRange, windowRange, setWindowRange, isDark }: TimeMachineProps) {
+export default function TimeMachine({
+  messages,
+  dataRange,
+  windowRange,
+  setWindowRange,
+  activeRange,
+  activeLabel,
+  isDark,
+}: TimeMachineProps) {
   const timeline = useMemo(
     () => (dataRange.firstMs ? buildTimeline(messages) : null),
     [messages, dataRange.firstMs]
@@ -43,13 +58,29 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
   const lastDay = timeline?.lastDayMs ?? 0;
   const bucketCount = buckets.length;
 
-  // Selection indices derived from the authoritative windowRange.
+  // Preset scope in bucket indices; selection/interaction clamps to it.
+  const activeBounds = useMemo<[number, number] | null>(() => {
+    if (!activeRange || bucketCount === 0) return null;
+    const startIdx = Math.max(0, Math.round((activeRange.startMs - firstDay) / DAY_MS));
+    const endIdx = Math.min(bucketCount - 1, Math.round((activeRange.endMs - firstDay) / DAY_MS));
+    if (startIdx > endIdx) return null;
+    return [startIdx, endIdx];
+  }, [activeRange, firstDay, bucketCount]);
+
+  // Selection indices derived from the authoritative windowRange, clamped
+  // into the preset scope (a stored window may predate a later preset change).
   const sel = useMemo<[number, number] | null>(() => {
     if (!windowRange || bucketCount === 0) return null;
     const startIdx = Math.max(0, Math.round((windowRange.startMs - firstDay) / DAY_MS));
     const endIdx = Math.min(bucketCount - 1, Math.round((windowRange.endMs - firstDay) / DAY_MS));
+    if (activeBounds) {
+      return [
+        Math.max(activeBounds[0], startIdx),
+        Math.min(activeBounds[1], endIdx),
+      ];
+    }
     return [startIdx, endIdx];
-  }, [windowRange, firstDay, bucketCount]);
+  }, [windowRange, firstDay, bucketCount, activeBounds]);
 
   // Latest range for the replay interval without re-subscribing every tick.
   const windowRef = useRef<WindowRange | null>(windowRange);
@@ -58,13 +89,16 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
   }, [windowRange]);
 
   const selectDays = useCallback(
-    (startIdx: number, endIdx: number) => {
+    (startIdxRaw: number, endIdxRaw: number) => {
       if (bucketCount === 0) return;
-      const s = Math.max(0, Math.min(startIdx, endIdx));
-      const e = Math.min(bucketCount - 1, Math.max(startIdx, endIdx));
+      // Clamp into the preset scope before normalizing order.
+      const lo = activeBounds ? activeBounds[0] : 0;
+      const hi = activeBounds ? activeBounds[1] : bucketCount - 1;
+      const s = Math.max(lo, Math.min(startIdxRaw, endIdxRaw));
+      const e = Math.min(hi, Math.max(startIdxRaw, endIdxRaw));
       setWindowRange({ startMs: buckets[s].dayMs, endMs: buckets[e].dayMs });
     },
-    [bucketCount, buckets, setWindowRange]
+    [bucketCount, buckets, setWindowRange, activeBounds]
   );
 
   const clearSelection = useCallback(() => {
@@ -80,7 +114,9 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
     }
     setSpeed(next);
     if (!windowRef.current && bucketCount > 0) {
-      selectDays(0, 0);
+      // Replay starts where the active scope starts, not at all-time day 0.
+      const startIdx = activeBounds ? activeBounds[0] : 0;
+      selectDays(startIdx, startIdx);
     }
   };
 
@@ -139,9 +175,14 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         const hFrac = t === 0 ? 0.04 : 0.08 + Math.sqrt(t) * 0.92;
         const h = H * hFrac;
 
-        let color: string;
         const inSel = sel && i >= sel[0] && i <= sel[1];
+        // Outside the preset scope: visibly locked, never looks selectable.
+        const outOfScope =
+          activeBounds !== null && (i < activeBounds[0] || i > activeBounds[1]);
+        let color: string;
         if (inSel) color = "#3b82f6";
+        else if (outOfScope)
+          color = isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)";
         else if (sel) color = isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.08)";
         else color = isDark ? `rgba(59,130,246,${0.25 + t * 0.75})` : `rgba(59,130,246,${0.35 + t * 0.65})`;
 
@@ -154,6 +195,7 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         for (const m of timeline.keyMoments) {
           const idx = Math.round((m.dayMs - firstDay) / DAY_MS);
           if (idx < 0 || idx >= n) continue;
+          if (activeBounds && (idx < activeBounds[0] || idx > activeBounds[1])) continue;
           const x = (idx / n) * W + barW / 2;
           ctx.beginPath();
           ctx.arc(x, 8, 4, 0, Math.PI * 2);
@@ -166,8 +208,8 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         }
       }
 
-      // Hover cursor
-      if (hoverDay !== null) {
+      // Hover cursor — suppressed over out-of-scope days
+      if (hoverDay !== null && !(activeBounds && (hoverDay < activeBounds[0] || hoverDay > activeBounds[1]))) {
         const x = (hoverDay / n) * W;
         ctx.fillStyle = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)";
         ctx.fillRect(x, 0, 1, H);
@@ -178,7 +220,7 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
     const ro = new ResizeObserver(draw);
     ro.observe(containerRef.current!);
     return () => ro.disconnect();
-  }, [buckets, bucketCount, sel, hoverDay, isDark, timeline, firstDay]);
+  }, [buckets, bucketCount, sel, hoverDay, isDark, timeline, firstDay, activeBounds]);
 
   // ---- Pointer interactions ----------------------------------------------
   const dayFromEvent = useCallback(
@@ -198,9 +240,13 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
     if (speed !== 0) setSpeed(0);
     const day = dayFromEvent(e.clientX);
     if (day === null) return;
-    dragState.current = { anchor: day };
+    // Clamp the anchor so a drag started outside the scope snaps inside it.
+    const clamped = activeBounds
+      ? Math.max(activeBounds[0], Math.min(activeBounds[1], day))
+      : day;
+    dragState.current = { anchor: clamped };
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    selectDays(day, day);
+    selectDays(clamped, clamped);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -215,6 +261,35 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
     dragState.current = null;
   };
 
+  // ---- Keyboard a11y (role="slider") --------------------------------------
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (bucketCount === 0) return;
+    const lo = activeBounds ? activeBounds[0] : 0;
+    const hi = activeBounds ? activeBounds[1] : bucketCount - 1;
+    const current = sel ? sel[1] : lo;
+    let next: number | null = null;
+
+    if (e.key === "ArrowRight") next = Math.min(hi, current + (e.shiftKey ? 7 : 1));
+    else if (e.key === "ArrowLeft") next = Math.max(lo, current - (e.shiftKey ? 7 : 1));
+    else if (e.key === "Home") next = lo;
+    else if (e.key === "End") next = hi;
+    else if (e.key === "Escape" && windowRange) {
+      e.preventDefault();
+      clearSelection();
+      return;
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      clearSelection();
+      return;
+    } else {
+      return;
+    }
+
+    e.preventDefault();
+    setSpeed(0);
+    selectDays(next, next);
+  };
+
   const fmtDay = (ms: number) =>
     new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
@@ -222,7 +297,24 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
     ? `${fmtDay(buckets[sel[0]].dayMs)} → ${fmtDay(buckets[sel[1]].dayMs)}`
     : null;
 
+  // Live region: derived directly from selection state — aria-live announces
+  // it whenever the text content changes.
+  const announcement = selLabel
+    ? `${activeLabel}: ${selLabel} selected`
+    : `${activeLabel} selected`;
+
+  // Honest chip: preset scope + selected window, both when both apply.
+  const chipLabel = selLabel
+    ? activeLabel === "All-Time"
+      ? `${selLabel} (selected window)`
+      : `${activeLabel} · ${selLabel} (selected window)`
+    : null;
+
   const yearsSpan = firstDay && lastDay ? ((lastDay - firstDay) / (365.25 * DAY_MS)).toFixed(1) : "0";
+
+  const scopeNote = activeRange
+    ? `${activeLabel} scope — days outside are locked`
+    : null;
 
   return (
     <div className={`rounded-2xl border p-5 mb-10 ${cardClasses(isDark)}`}>
@@ -231,11 +323,12 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
           <h2 className={`text-lg font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Time Machine</h2>
           <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
             {timeline ? `${timeline.activeDays.toLocaleString("en-IN")} active days across ${yearsSpan} years — drag to zoom any era` : "No data"}
+            {scopeNote ? ` · ${scopeNote}` : ""}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {selLabel && (
+          {chipLabel && (
             <button
               onClick={clearSelection}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
@@ -243,15 +336,16 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
               }`}
             >
               <X size={13} />
-              {selLabel}
+              {chipLabel}
             </button>
           )}
 
-          <div className={`flex items-center rounded-full p-0.5 ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
+          <div className={`flex items-center rounded-full p-0.5 ${isDark ? "bg-white/5" : "bg-zinc-100"}`} role="group" aria-label="Replay speed">
             {([1, 10, 60, 600] as Speed[]).map((s) => (
               <button
                 key={s}
                 onClick={() => toggleReplay(s)}
+                aria-pressed={speed === s}
                 className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
                   speed === s
                     ? "bg-[#3b82f6] text-white"
@@ -274,6 +368,20 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         <canvas
           ref={canvasRef}
           className="w-full h-full cursor-crosshair"
+          aria-hidden
+        />
+        {/* Interaction + a11y slider surface (visually transparent, sits above canvas) */}
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="Time Machine scrubber — selects the analyzed date range"
+          aria-valuemin={activeBounds ? activeBounds[0] : 0}
+          aria-valuemax={activeBounds ? activeBounds[1] : Math.max(0, bucketCount - 1)}
+          aria-valuenow={sel ? sel[1] : activeBounds ? activeBounds[0] : 0}
+          aria-valuetext={selLabel ? `${activeLabel}: ${selLabel}` : activeLabel}
+          aria-orientation="horizontal"
+          onKeyDown={onKeyDown}
+          className="absolute inset-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] rounded-xl"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -291,12 +399,18 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         )}
       </div>
 
+      {/* Live region for screen readers */}
+      <span className="sr-only" aria-live="polite">{announcement}</span>
+
       {/* Hover tooltip */}
       <div className={`h-5 mt-2 text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
         {hoverDay !== null && buckets[hoverDay] && (
           <span>
             <span className="font-semibold">{fmtDay(buckets[hoverDay].dayMs)}</span>
             {" · "}{buckets[hoverDay].count.toLocaleString("en-IN")} messages
+            {activeBounds && (hoverDay < activeBounds[0] || hoverDay > activeBounds[1]) && (
+              <span className="ml-1 opacity-70">· outside {activeLabel}</span>
+            )}
           </span>
         )}
       </div>
@@ -314,7 +428,7 @@ export default function TimeMachine({ messages, dataRange, windowRange, setWindo
         <Info size={12} className="mt-0.5 flex-shrink-0" />
         <span>
           Everything below — stats, leaderboard, word cloud, Hall of Fame — recomputes live for the selected window.
-          Speeds are days-per-second of replay.
+          Speeds are days-per-second of replay. Keyboard: ←/→ move a day, Shift+←/→ a week, Home/End jump, Esc clears.
         </span>
       </div>
     </div>

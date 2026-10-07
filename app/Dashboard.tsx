@@ -16,6 +16,7 @@ import VibeScore from "../components/dashboard/VibeScore";
 import { StatCard, cardClasses } from "../components/dashboard/Cards";
 import { useChatStats, useTheme } from "../lib/useChatStats";
 import { useDebouncedValue } from "../lib/useDebounced";
+import { presetLabel } from "../lib/presetRange";
 import { computePairStats } from "../lib/analytics/pairStats";
 import type { ParseResult } from "../types";
 
@@ -66,6 +67,7 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
     filterOptions,
     timeFilter,
     setTimeFilter,
+    presetRange,
     windowRange,
     setWindowRange,
     dataRange,
@@ -136,6 +138,12 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
     const match = filterOptions.months.find((m) => m.sortKey === timeFilter);
     return match ? `${match.label} Wrapped` : `${timeFilter} Wrapped`;
   })();
+
+  const monthLabels = useMemo(
+    () => new Map(filterOptions.months.map((m) => [m.sortKey, m.label])),
+    [filterOptions.months]
+  );
+  const activeFilterLabel = presetLabel(timeFilter, monthLabels);
 
   const posterDateLabel = headerRangeLabel.replace(" (selected window)", "");
 
@@ -251,6 +259,8 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
             dataRange={dataRange}
             windowRange={windowRange}
             setWindowRange={setWindowRange}
+            activeRange={presetRange}
+            activeLabel={activeFilterLabel}
             isDark={isDark}
           />
 
@@ -304,6 +314,7 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
                   <div className={`flex items-center rounded-full p-0.5 ${isDark ? "bg-white/5" : "bg-zinc-100"}`}>
                     <button
                       onClick={() => setLeaderboardView("list")}
+                      aria-pressed={leaderboardView === "list"}
                       className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${
                         leaderboardView === "list"
                           ? isDark ? "bg-white/15 text-white" : "bg-white text-zinc-900 shadow-sm"
@@ -314,6 +325,7 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
                     </button>
                     <button
                       onClick={() => setLeaderboardView("chart")}
+                      aria-pressed={leaderboardView === "chart"}
                       className={`px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150 ${
                         leaderboardView === "chart"
                           ? isDark ? "bg-white/15 text-white" : "bg-white text-zinc-900 shadow-sm"
@@ -377,6 +389,7 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
                 <button
                   key={key}
                   onClick={() => setDeepDive(deepDive === key ? "none" : key)}
+                  aria-pressed={deepDive === key}
                   className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 ${
                     deepDive === key
                       ? "bg-[#3b82f6] text-white"
@@ -405,6 +418,9 @@ export default function Dashboard({ data, onExit }: DashboardProps) {
                 isDark={isDark}
                 minStrength={0}
                 onNodeClick={setDossierSender}
+                rangeLabel={activeFilterLabel}
+                firstMs={dataRange.firstMs}
+                lastMs={dataRange.lastMs}
               />
             </div>
           )}

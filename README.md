@@ -101,6 +101,11 @@ Filter the entire dashboard — all stats, charts, leaderboard, Word Cloud, and 
 
 One-click **"Export Wrapped"** generates a high-resolution **1080×1920 PNG poster** — styled for Instagram Stories, WhatsApp Status, or Twitter — entirely client-side via `html-to-image`. The poster includes total messages, busiest date, and all four main Hall of Fame awards.
 
+The **Connection Web** has two share formats:
+
+- **PNG** — flat snapshot of the current layout.
+- **Share HTML** — a single self-contained `vibecheck-connections.html` (~50–100 KB) that anyone can open offline and *explore*: drag nodes, pan and zoom, hover for exact reply stats, and re-export as PNG — with zero dependencies, no CDN, and no server. Nothing leaves either party's machine. Node/link caps (60/200, strongest by messages/exchanges, noted in the file footer) keep small chats small and big chats openable.
+
 ### Privacy by Architecture
 
 - **Zero server involvement.** Parsing runs in a Web Worker (a sandboxed background thread with no network or DOM access) in your browser.
@@ -188,7 +193,7 @@ There is no backend. There is no database. There is no analytics pipeline. The a
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js **20.9+** (Next.js 16 hard requirement — Node 18 will fail at build time)
 - npm, yarn, or pnpm
 
 ### Installation
@@ -217,12 +222,12 @@ npm start
 ### Tests & Checks
 
 ```bash
-npm test        # Vitest unit tests (parser + stats)
+npm test        # Vitest unit tests (parser, stats, analytics, export)
 npm run lint    # ESLint
 npm run typecheck  # tsc --noEmit
 ```
 
-The parsing core (`lib/whatsapp-parser.ts`) and stats engine (`lib/calculateStats.ts`) are pure, dependency-free modules covered by 30+ unit tests across all six WhatsApp export formats, Telegram JSON, and every Hall of Fame calculation. GitHub Actions runs the full suite (typecheck, lint, tests, build) on every push and pull request.
+The parsing core (`lib/whatsapp-parser.ts`) and analytics engines (`lib/calculateStats.ts`, `lib/analytics/*`, `lib/export/graphHtml.ts`) are pure, dependency-free modules covered by **90+ unit tests** across 11 suites: all six WhatsApp export formats, Telegram JSON, every Hall of Fame calculation, radar geometry, time-range derivation, HTML-export safety (script-breakout tests), and a runtime test that executes the exported page's script in a simulated DOM. GitHub Actions runs the full suite (typecheck, lint, tests, build) on every push and pull request.
 
 ### Project Structure
 
@@ -235,19 +240,39 @@ StatsApp/
 ├── components/
 │   ├── WordCloud.tsx          # Word Cloud component
 │   └── dashboard/             # Dashboard building blocks
+│       ├── AnimatedNumber.tsx # Tweening number display (replay-friendly)
 │       ├── Cards.tsx          # StatCard + AchievementCard
+│       ├── EmojiGalaxy.tsx    # three.js WebGL emoji universe
 │       ├── HallOfFame.tsx     # Achievements grid
 │       ├── Leaderboard.tsx    # List + donut chart views
+│       ├── MemberDossier.tsx  # Per-member deep-dive drawer
+│       ├── NetworkGraph.tsx   # d3-force Connection Web (+ HTML export)
 │       ├── Poster.tsx         # 1080×1920 export poster
+│       ├── TimeMachine.tsx    # Time scrubber + replay
+│       ├── VibeScore.tsx      # 5-axis radar + verdict
 │       └── WarningsBanner.tsx # Parser data-quality warnings
 ├── lib/
 │   ├── parser.worker.ts       # Web Worker: parse plumbing (chunked + full)
 │   ├── whatsapp-parser.ts     # Pure WhatsApp/Telegram parsing core (unit-tested)
 │   ├── calculateStats.ts      # Shared stats aggregation (used by worker + UI)
-│   ├── useChatStats.ts        # Dashboard state hook (filter, theme, stats)
+│   ├── useChatStats.ts        # Dashboard state hook (filter, window, theme)
+│   ├── useDebounced.ts        # Debounced value hook
+│   ├── presetRange.ts         # Preset filter → concrete time range
+│   ├── recents.ts             # Recent analyses store (localStorage)
 │   ├── word-extraction.worker.ts # Web Worker: word cloud extraction
-│   └── optimized-word-extraction.ts
-├── tests/                     # Vitest unit tests
+│   ├── optimized-word-extraction.ts
+│   ├── analytics/             # Pure analysis engines (unit-tested)
+│   │   ├── communities.ts     # Louvain detection + cluster auto-naming
+│   │   ├── emojiStats.ts      # Per-emoji usage + co-occurrence
+│   │   ├── memberStats.ts     # Per-member dossier analytics
+│   │   ├── pairStats.ts       # Directed reply graph + response times
+│   │   ├── radar.ts           # Self-sizing radar geometry
+│   │   ├── text-utils.ts      # Tokenizing / emoji / avatar helpers
+│   │   ├── timeline.ts        # Day buckets + key-moment detection
+│   │   └── vibeScore.ts       # 5-axis chat personality score
+│   └── export/
+│       └── graphHtml.ts       # Self-contained interactive HTML export
+├── tests/                     # Vitest unit + runtime tests
 ├── types.ts                   # Shared TypeScript types
 └── vitest.config.ts
 ```
@@ -266,7 +291,6 @@ StatsApp/
 | Parsing | Web Workers + RegEx |
 | Testing | Vitest |
 | CI | GitHub Actions (typecheck, lint, tests, build) |
-| d3-force / graphology / three | Force layout, community detection, WebGL galaxy |
 | Deployment | Vercel |
 
 ---
@@ -293,6 +317,10 @@ StatsApp/
 - [x] Vibe Score — 5-axis radar personality score
 - [x] Member Dossiers — per-member deep-dive drawer
 - [x] Recent analyses — re-open past analyses from the landing page
+- [x] Interactive HTML export of the Connection Web (offline-shareable, zero dependencies)
+- [x] Time Machine ↔ preset filter sync (locked scope, clamped brush, replay start)
+- [x] Accessibility: keyboard scrubber, aria-pressed toggles, canvas fallbacks, reduced motion
+- [x] Social share metadata + generated OG image
 - [ ] Modular export switcher (selectable poster layouts)
 - [ ] Hinglish sentiment analysis
 - [ ] Poster: Connection Web and Vibe Score panels
