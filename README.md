@@ -11,6 +11,15 @@
 
 VibeCheck is a **privacy-first, fully client-side** WhatsApp and Telegram chat analyzer. Upload your export and get a Spotify Wrapped–style analytics dashboard — rich stats, interactive charts, Hall of Fame achievements, a Word Cloud, a Time Machine scrubber, a force-directed Connection Web, a WebGL Emoji Galaxy, a Vibe Score, and a shareable 1080×1920 poster — all without a single byte of your data leaving your device.
 
+<p align="center">
+  <a href="public/brag.mp4">
+    <img src="public/brag-preview.gif" alt="VibeCheck Demo" width="100%" />
+  </a>
+</p>
+<p align="center">
+  <em>Click the image to view the full resolution video with audio.</em>
+</p>
+
 ---
 
 ## Features
@@ -71,13 +80,19 @@ A density heatmap of the chat's entire history, baked onto a canvas strip. **Dra
 ### Deep Dives
 
 Two heavyweight, on-demand visualizations (lazy-loaded, only when opened):
-- **Connection Web** — d3-force physics graph: people are nodes, replies are edges. Louvain community detection colors the clusters and auto-names them from member traits ("The Night Owls", "The Meme Lords", "The Quick Draw"). Hover an edge for exact stats ("Priya → Rohan: 347 replies, avg 42s"), drag nodes, zoom, and export as PNG.
+
+- **Connection Web** — d3-force physics graph: people are nodes, replies are edges. Louvain community detection colors the clusters and auto-names them from member traits ("The Night Owls", "The Meme Lords", "The Quick Draw"). Hover an edge for exact stats ("Priya → Rohan: 347 replies, avg 42s"), drag nodes, zoom, and export as PNG.
 - **Emoji Galaxy** — a WebGL universe (three.js) where every emoji is a planet: size = usage, proximity = used together. Orbit/zoom freely, click a planet for its story — who uses it, when it first appeared, its monthly trend.
 
 ### Vibe Score
 
 A 0–100 personality score for the chat with a 5-axis radar:
-- **Activity** — messages per member per day- **Balance** — how evenly members share the conversation (Shannon entropy)- **Loyalty** — share of the chat's lifespan with daily activity- **Chaos** — how spread out the hours of activity are- **Depth** — average words per message
+
+- **Activity** — messages per member per day
+- **Balance** — how evenly members share the conversation (Shannon entropy)
+- **Loyalty** — share of the chat's lifespan with daily activity
+- **Chaos** — how spread out the hours of activity are
+- **Depth** — average words per message
 
 Each score ships with a verdict line ("Elite group chat energy. Protect this at all costs.")
 
